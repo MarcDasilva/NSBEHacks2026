@@ -89,7 +89,7 @@ export default function DashboardPage() {
         gsap.fromTo(
           signOutEl,
           { opacity: 0 },
-          { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" }
+          { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" },
         );
       }
       const t2 = setTimeout(() => {

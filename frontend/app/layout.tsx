@@ -8,6 +8,7 @@ import {
   GeistPixelLine,
 } from "geist/font/pixel";
 import { PostLoginPhaseProvider } from "@/contexts/PostLoginPhaseContext";
+import "./globals.css";
 
 export default function RootLayout({
   children,

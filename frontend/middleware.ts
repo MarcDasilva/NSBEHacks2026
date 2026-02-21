@@ -8,9 +8,9 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Run on dashboard so unauthenticated users are redirected to landing.
-     * Exclude static files and API routes.
+     * Run on all routes so the session is refreshed and cookies stay in sync.
+     * Then we redirect /dashboard to / when not authenticated.
      */
-    "/dashboard/:path*",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

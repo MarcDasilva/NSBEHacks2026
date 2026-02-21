@@ -8,17 +8,35 @@ import {
   usePostLoginPhase,
   FADE_DURATION,
 } from "@/contexts/PostLoginPhaseContext";
+import { AppSidebar } from "@/components/app-sidebar";
+import { ChartAreaInteractive } from "@/components/chart-area-interactive";
+import { DataTable } from "@/components/data-table";
+import { SectionCards } from "@/components/section-cards";
+import { SiteHeader } from "@/components/site-header";
+import {
+  SidebarInset,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
+import data from "./data.json";
 
 const WELCOME_DURATION = 4;
+
+type UserInfo = {
+  name: string;
+  email: string;
+  avatar: string;
+};
 
 export default function DashboardPage() {
   const router = useRouter();
   const { phase, setPhase } = usePostLoginPhase();
   const [firstname, setFirstname] = useState<string>("");
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const welcomeRef = useRef<HTMLDivElement>(null);
   const welcomeHeadingRef = useRef<HTMLHeadingElement>(null);
-  const signOutRef = useRef<HTMLDivElement>(null);
+  const dashboardRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
   const animRunRef = useRef(false);
 
@@ -40,6 +58,11 @@ export default function DashboardPage() {
         user?.user_metadata?.full_name?.split(" ")[0] ||
         "there";
       setFirstname(name);
+      setUserInfo({
+        name: user?.user_metadata?.full_name || user?.user_metadata?.given_name || name,
+        email: user?.email ?? "",
+        avatar: user?.user_metadata?.avatar_url || "",
+      });
       setPhase("welcome");
       setAuthChecked(true);
     });
@@ -77,20 +100,12 @@ export default function DashboardPage() {
     const t = setTimeout(() => {
       setPhase("fading");
       const welcomeEl = welcomeRef.current;
-      const signOutEl = signOutRef.current;
       if (welcomeEl) {
         gsap.to(welcomeEl, {
           opacity: 0,
           duration: FADE_DURATION,
           ease: "power2.inOut",
         });
-      }
-      if (signOutEl) {
-        gsap.fromTo(
-          signOutEl,
-          { opacity: 0 },
-          { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" },
-        );
       }
       const t2 = setTimeout(() => {
         setPhase("done");
@@ -108,7 +123,18 @@ export default function DashboardPage() {
   };
 
   const showWelcome = phase === "welcome" || phase === "fading";
-  const showSignOut = phase === "fading" || phase === "done";
+  const showDashboard = phase === "done" && userInfo;
+
+  // Fade in dashboard when it mounts (phase === "done")
+  useEffect(() => {
+    if (phase !== "done" || !dashboardRef.current) return;
+    const el = dashboardRef.current;
+    gsap.fromTo(
+      el,
+      { opacity: 0 },
+      { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" },
+    );
+  }, [phase]);
 
   const welcomeText = firstname ? `Welcome Back ${firstname}!` : "";
 
@@ -162,33 +188,43 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {showSignOut && firstname && (
+      {showDashboard && userInfo && (
         <div
-          ref={signOutRef}
+          ref={dashboardRef}
           style={{
             position: "fixed",
-            bottom: "1.5rem",
-            right: "1.5rem",
+            inset: 0,
             zIndex: 10,
-            opacity: phase === "done" ? 1 : 0,
+            opacity: 0,
+            minHeight: "100vh",
+            width: "100%",
           }}
         >
-          <button
-            type="button"
-            onClick={handleSignOut}
-            style={{
-              padding: "0.5rem 1rem",
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              color: "#fff",
-              backgroundColor: "#dc2626",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-            }}
+          <SidebarProvider
+            style={
+              {
+                "--sidebar-width": "calc(var(--spacing) * 72)",
+                "--header-height": "calc(var(--spacing) * 12)",
+              } as React.CSSProperties
+            }
           >
-            Sign out
-          </button>
+            <AppSidebar user={userInfo} onLogout={handleSignOut} variant="inset" />
+            <SidebarInset>
+              <SiteHeader />
+              <div className="flex flex-1 flex-col">
+                <div className="@container/main flex flex-1 flex-col gap-2">
+                  <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+                    <SectionCards />
+                    <div className="px-4 lg:px-6">
+                      <ChartAreaInteractive />
+                    </div>
+                    <DataTable data={data} />
+                  </div>
+                </div>
+              </div>
+            </SidebarInset>
+            <Toaster />
+          </SidebarProvider>
         </div>
       )}
     </>

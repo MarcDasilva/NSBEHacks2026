@@ -1,13 +1,16 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import LogoLoop from "@/components/LogoLoop";
+import { getSupabase } from "@/lib/supabase/client";
 import styles from "./page.module.css";
 
 const LOGO_LOOP_ITEMS = [
+  { src: "/logoloop/image1.png", alt: "Image 1" },
+  { src: "/logoloop/image2.png", alt: "Image 2" },
   { src: "/logoloop/gemini-white.png", alt: "Gemini" },
   { src: "/logoloop/openai-white.png", alt: "OpenAI" },
   { src: "/logoloop/claude-ai-white.png", alt: "Claude" },
@@ -214,17 +217,66 @@ const PROVIDERS = [
   },
 ];
 
+function useLogoHeight() {
+  const [height, setHeight] = useState(44);
+  useEffect(() => {
+    const update = () => {
+      if (typeof window === "undefined") return;
+      const w = window.innerWidth;
+      if (w >= 1024) setHeight(40);
+      else if (w >= 768) setHeight(44);
+      else setHeight(36);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return height;
+}
+
 export default function Home() {
   const [activeProvider, setActiveProvider] =
     useState<(typeof PROVIDERS)[number]["id"]>("gemini");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const logoHeight = useLogoHeight();
+
+  const handleSignInWithGoogle = async () => {
+    setAuthError(null);
+    const supabase = getSupabase();
+    if (!supabase) {
+      setAuthError(
+        "Sign-in not configured. In frontend/.env set NEXT_PUBLIC_SUPABASE_URL to your project URL (https://xxxx.supabase.co) and NEXT_PUBLIC_SUPABASE_ANON_KEY to your anon key. Restart the dev server.",
+      );
+      return;
+    }
+    setAuthLoading(true);
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback`
+        : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+    setAuthLoading(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    // Success: Supabase redirects to Google, so we don't need to do anything here
+  };
 
   const apixchangeRef = useRef<HTMLHeadingElement>(null);
   const restRef = useRef<HTMLDivElement>(null);
+  const logoLoopRef = useRef<HTMLDivElement>(null);
   useGSAP(() => {
     const el = apixchangeRef.current;
     const rest = restRef.current;
+    const logoLoop = logoLoopRef.current;
     if (!el?.children.length) return;
     if (rest) gsap.set(rest, { opacity: 0, y: 24 });
+    if (logoLoop) gsap.set(logoLoop, { opacity: 0, y: 24 });
     const chars = Array.from(el.children);
     const tl = gsap.timeline();
     tl.fromTo(
@@ -238,11 +290,19 @@ export default function Home() {
         ease: "power3.out",
       },
     );
+    const fadeInPosition = "-=1.2";
     if (rest) {
       tl.to(
         rest,
         { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" },
-        "-=1.2",
+        fadeInPosition,
+      );
+    }
+    if (logoLoop) {
+      tl.to(
+        logoLoop,
+        { opacity: 0.88, y: 0, duration: 0.8, ease: "power3.out" },
+        rest ? "<" : fadeInPosition,
       );
     }
   }, []);
@@ -259,29 +319,20 @@ export default function Home() {
         width: "100%",
         maxWidth: "42rem",
         padding: "0 1rem",
+        zIndex: 1,
       }}
     >
       <div style={{ pointerEvents: "none" }}>
-        <div style={{ display: "inline-block", textAlign: "center" }}>
-          <div
-            style={{
-              width: "100%",
-              overflow: "hidden",
-              marginBottom: "0.75rem",
-            }}
-          >
-            <LogoLoop
-              logos={LOGO_LOOP_ITEMS}
-              width="100%"
-              logoHeight={28}
-              gap={32}
-              speed={80}
-              direction="left"
-              fadeOut
-              fadeOutColor="#0d0d0d"
-              ariaLabel="Partner logos"
-            />
-          </div>
+        {/* Flex column-reverse: h1 is in DOM first so it sets width, logo appears above it */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column-reverse",
+            alignItems: "center",
+            textAlign: "center",
+            width: "100%",
+          }}
+        >
           <h1
             ref={apixchangeRef}
             style={{
@@ -302,8 +353,30 @@ export default function Home() {
               </span>
             ))}
           </h1>
+          <div
+            ref={logoLoopRef}
+            style={{
+              width: "100%",
+              maxWidth: "100%",
+              overflow: "hidden",
+              marginBottom: "0.25rem",
+              marginTop: "-4rem",
+              flexShrink: 0,
+            }}
+          >
+            <LogoLoop
+              logos={LOGO_LOOP_ITEMS}
+              width="100%"
+              logoHeight={logoHeight}
+              gap={32}
+              speed={35}
+              direction="left"
+              ariaLabel="Partner logos"
+              style={{ overflow: "hidden" }}
+            />
+          </div>
         </div>
-        <div ref={restRef}>
+        <div ref={restRef} style={{ pointerEvents: "auto" }}>
           <p
             style={{
               fontFamily: "var(--font-geist-pixel-grid)",
@@ -444,9 +517,78 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Sign in with Google */}
+          <div style={{ marginTop: "1.5rem" }}>
+            <button
+              type="button"
+              onClick={handleSignInWithGoogle}
+              disabled={authLoading}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "1.25rem",
+                width: "100%",
+                maxWidth: "20rem",
+                padding: "0.6rem 1.25rem",
+                backgroundColor: "rgba(255, 255, 255, 0.85)",
+                color: "#000",
+                border: "none",
+                borderRadius: 8,
+                fontFamily: "var(--font-geist-pixel-square)",
+                fontSize: "1.15rem",
+                fontWeight: 700,
+                cursor: authLoading ? "wait" : "pointer",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+                opacity: authLoading ? 0.8 : 1,
+              }}
+            >
+              <GoogleLogoIcon />
+              {authLoading ? "Redirecting…" : "Sign in with Google"}
+            </button>
+            {authError && (
+              <p
+                style={{
+                  marginTop: "0.75rem",
+                  fontFamily: "var(--font-geist-sans)",
+                  fontSize: "0.9rem",
+                  color: "#f87171",
+                  maxWidth: "20rem",
+                  marginLeft: "auto",
+                  marginRight: "auto",
+                }}
+              >
+                {authError}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function GoogleLogoIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="#000"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#000"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      />
+      <path
+        fill="#000"
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+      />
+      <path
+        fill="#000"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+      />
+    </svg>
   );
 }
 

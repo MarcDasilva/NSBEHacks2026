@@ -2,21 +2,25 @@
 
 import FaultyTerminal from "./FaultyTerminal";
 
+// Stable refs so parent re-renders (e.g. PostLoginPhaseContext phase updates) don't
+// retrigger FaultyTerminal's useEffect and cause WebGL re-init / page-load animation replay.
+const GRID_MUL: [number, number] = [2, 1];
+const CONTAINER_STYLE = {
+  position: "fixed" as const,
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  zIndex: 0,
+  backgroundColor: "#0d0d0d",
+};
+const TERMINAL_STYLE = { width: "100%", height: "100%" };
+
 export default function FaultyTerminalBackground() {
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        zIndex: 0,
-        backgroundColor: "#0d0d0d",
-      }}
-    >
+    <div style={CONTAINER_STYLE}>
       <FaultyTerminal
         scale={1.5}
-        gridMul={[2, 1]}
+        gridMul={GRID_MUL}
         digitSize={1.9}
         timeScale={0.5}
         pause={false}
@@ -33,7 +37,7 @@ export default function FaultyTerminalBackground() {
         pageLoadAnimation
         brightness={0.9}
         className=""
-        style={{ width: "100%", height: "100%" }}
+        style={TERMINAL_STYLE}
       />
     </div>
   );

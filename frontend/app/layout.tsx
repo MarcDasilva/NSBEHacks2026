@@ -7,7 +7,7 @@ import {
   GeistPixelTriangle,
   GeistPixelLine,
 } from "geist/font/pixel";
-import FaultyTerminalBackground from "../components/FaultyTerminalBackground";
+import { PostLoginPhaseProvider } from "@/contexts/PostLoginPhaseContext";
 
 export default function RootLayout({
   children,
@@ -28,8 +28,9 @@ export default function RootLayout({
           backgroundColor: "#0d0d0d",
         }}
       >
-        <FaultyTerminalBackground />
-        <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
+        <PostLoginPhaseProvider>
+          <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
+        </PostLoginPhaseProvider>
       </body>
     </html>
   );

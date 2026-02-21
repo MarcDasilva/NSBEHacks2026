@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "npx ts-node src/server.ts",
     "mint": "npx ts-node src/mint.ts",
     "buy": "npx ts-node src/buy.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,9 +13,19 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.97.0",
     "@types/node": "^25.3.0",
+    "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "xrpl": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/crypto-js": "^4.2.2",
+    "@types/express": "^5.0.6"
   }
 }

@@ -1,0 +1,104 @@
+.subtitleLine1 {
+  display: inline;
+}
+
+.subtitleLine2 {
+  display: inline;
+}
+
+@media (max-width: 768px) {
+  .subtitleLine1 {
+    display: block;
+  }
+}
+
+/* SDK window: glass effect, slightly rounded */
+.sdkWindow {
+  background: rgba(26, 26, 30, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+  max-width: 32rem;
+  border-radius: 10px;
+}
+
+.sdkHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sdkCode {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: clamp(0.65rem, 1.5vw, 0.8rem);
+  line-height: 1.55;
+  padding: 0.65rem 0.85rem;
+  color: #d4d4d4;
+  overflow: auto;
+}
+
+.sdkFooter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 768px) {
+  .sdkWindow {
+    max-width: min(22rem, 92vw);
+  }
+
+  .sdkHeader {
+    padding: 0.4rem 0.5rem;
+    gap: 0.35rem;
+  }
+
+  .sdkHeader .sdkTraffic {
+    width: 8px !important;
+    height: 8px !important;
+  }
+
+  .sdkCode {
+    font-size: 0.6rem;
+    line-height: 1.5;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .sdkCode .sdkLineNum {
+    width: 1.5em !important;
+    margin-right: 0.5rem !important;
+    font-size: 0.6rem !important;
+  }
+
+  .sdkFooter {
+    padding: 0.35rem 0.5rem;
+    gap: 0.35rem;
+  }
+
+  .sdkFooter .sdkIcon {
+    width: 22px !important;
+    height: 22px !important;
+  }
+}
+
+.sdkIconBtn {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.paramPill {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  margin: 0 0.1em;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}

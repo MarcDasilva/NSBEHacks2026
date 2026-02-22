@@ -1,9 +1,15 @@
 CREATE TABLE public.proxy_api_keys (
     proxy_key TEXT PRIMARY KEY,
     real_key TEXT NOT NULL,
+    token_type TEXT NOT NULL,
+    user_id uuid NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT proxy_api_keys_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_proxy_api_keys_token_type ON public.proxy_api_keys USING btree (token_type);
+CREATE INDEX IF NOT EXISTS idx_proxy_api_keys_user_id ON public.proxy_api_keys USING btree (user_id);
 
 create table public.wallets (
   id uuid not null default gen_random_uuid (),
@@ -46,6 +52,7 @@ CREATE TABLE public.api_key_transactions (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     api_key TEXT NOT NULL,
     transaction_id TEXT NOT NULL,
+    token_type TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NULL DEFAULT now(),
     CONSTRAINT api_key_transactions_pkey PRIMARY KEY (id)
@@ -53,6 +60,7 @@ CREATE TABLE public.api_key_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_api_key_transactions_api_key ON public.api_key_transactions USING btree (api_key) TABLESPACE pg_default;
 CREATE INDEX IF NOT EXISTS idx_api_key_transactions_transaction_id ON public.api_key_transactions USING btree (transaction_id) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_api_key_transactions_token_type ON public.api_key_transactions USING btree (token_type) TABLESPACE pg_default;
 
 -- Table to store token prices at specific time points
 CREATE TABLE public.token_prices (

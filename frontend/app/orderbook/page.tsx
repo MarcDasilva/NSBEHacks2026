@@ -29,6 +29,11 @@ const TOKEN_CURRENCY = "GGK";
 const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
 const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
 
+const TOKEN_CONFIG = {
+  currency: TOKEN_CURRENCY,
+  issuer: ISSUER_ADDRESS,
+};
+
 interface OrderBookEntry {
   account: string;
   quantity: number;
@@ -205,6 +210,7 @@ export default function OrderBookPage() {
           </div>
           <div className="flex items-center gap-2">
             <BuyOrderDialog
+              tokenConfig={TOKEN_CONFIG}
               trigger={
                 <Button size="sm" className="bg-green-600 hover:bg-green-700">
                   Buy Tokens
@@ -212,6 +218,7 @@ export default function OrderBookPage() {
               }
             />
             <SellOrderDialog
+              tokenConfig={TOKEN_CONFIG}
               trigger={
                 <Button size="sm" variant="destructive">
                   Sell Tokens

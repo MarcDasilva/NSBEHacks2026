@@ -1,6 +1,6 @@
 import Elysia from "elysia";
 import { db } from "./database";
-import { count_api_keys, get_real_key } from "./db/queries_sql";
+import { count_api_keys, get_real_key, deduct_user_tokens, get_user_token_balance } from "./db/queries_sql";
 import { fetch } from "bun";
 import xrpl, { Wallet } from "xrpl";
 import {
@@ -59,6 +59,53 @@ const apiKeyHandlers: Record<ApiType, ApiKeyHandler> = {
 const FORBIDDEN_HEADERS = [
     "host", "connection", "content-length", "accept-encoding", "accept-language", "origin", "referer", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-dest", "sec-fetch-user", "upgrade-insecure-requests", "user-agent", "cookie", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"
 ];
+
+interface OpenAIUsage {
+    input_tokens: number;
+    input_tokens_details?: { cached_tokens: number };
+    output_tokens: number;
+    output_tokens_details?: { reasoning_tokens: number };
+    total_tokens: number;
+}
+
+interface OpenAIResponse {
+    usage?: OpenAIUsage;
+    [key: string]: unknown;
+}
+
+function extractOpenAITokenUsage(response: OpenAIResponse): OpenAIUsage | null {
+    if (response.usage && typeof response.usage.total_tokens === "number") {
+        return {
+            input_tokens: response.usage.input_tokens ?? 0,
+            input_tokens_details: response.usage.input_tokens_details,
+            output_tokens: response.usage.output_tokens ?? 0,
+            output_tokens_details: response.usage.output_tokens_details,
+            total_tokens: response.usage.total_tokens,
+        };
+    }
+    return null;
+}
+
+function extractGeminiTokenUsage(response: any): number {
+    return response.usageMetadata?.totalTokenCount ?? 0;
+}
+
+async function deductTokensForUser(db: any, userId: string, tokenType: string, tokensToDeduct: number) {
+    const currentBalance = await get_user_token_balance(db, {
+        userId,
+        tokenName: tokenType
+    });
+    if (currentBalance && currentBalance.tokenAmount >= tokensToDeduct) {
+        await deduct_user_tokens(db, {
+            amount: tokensToDeduct,
+            userId,
+            tokenName: tokenType
+        });
+        console.log(`[PROXY] Deducted ${tokensToDeduct} tokens from user ${userId} (token type: ${tokenType}). Remaining: ${currentBalance.tokenAmount - tokensToDeduct}`);
+    } else {
+        console.warn(`[PROXY] Insufficient tokens for user ${userId}. Required: ${tokensToDeduct}, Available: ${currentBalance?.tokenAmount ?? 0}`);
+    }
+}
 
 const app = new Elysia()
     .get("/", () => "Hello Elysia")
@@ -125,12 +172,51 @@ const app = new Elysia()
                 fetchOptions.body = typeof body === "string" ? body : JSON.stringify(body);
             }
             // Forward request
-            const resp = await fetch(target, fetchOptions)
+            const resp = await fetch(target, fetchOptions);
             // Forward response status, headers, and body
-            return await resp.json();
+            const responseData = await resp.json() as OpenAIResponse;
+
+            // Extract token usage for OpenAI API responses and deduct from user balance
+            let tokenUsage: OpenAIUsage | null = null;
+            if (apiType === "openai") {
+                tokenUsage = extractOpenAITokenUsage(responseData);
+                if (tokenUsage) {
+                    console.log(`[PROXY] OpenAI token usage - Input: ${tokenUsage.input_tokens}, Output: ${tokenUsage.output_tokens}, Total: ${tokenUsage.total_tokens}`);
+                    const tokensToDeduct = tokenUsage.total_tokens;
+                    const { userId, tokenType } = result;
+                    await deductTokensForUser(db, userId, tokenType, tokensToDeduct);
+                }
+            } else if (apiType === "google") {
+                const googleTokenUsage = extractGeminiTokenUsage(responseData);
+                console.log(`[PROXY] Gemini token usage - Total tokens: ${googleTokenUsage}`);
+                const { userId, tokenType } = result;
+                await deductTokensForUser(db, userId, tokenType, googleTokenUsage);
+            }
+
+            return responseData;
         } catch (err: any) {
             return { error: err.message || "Proxy error" };
         }
+    })
+    // Get token usage from an OpenAI response body
+    .post("/proxy/extract-usage", async ({ body }) => {
+        const response = body as OpenAIResponse;
+
+        const usage = extractOpenAITokenUsage(response);
+        if (!usage) {
+            return { error: "No usage data found in response" };
+        }
+
+        return {
+            success: true,
+            usage: {
+                input_tokens: usage.input_tokens,
+                input_tokens_details: usage.input_tokens_details,
+                output_tokens: usage.output_tokens,
+                output_tokens_details: usage.output_tokens_details,
+                total_tokens: usage.total_tokens,
+            },
+        };
     })
     .post("/tokens/issue", async ({ body }) => {
         const { address, amount, token_type } = body as { address: string; amount: string; token_type: TokenType };

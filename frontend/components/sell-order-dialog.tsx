@@ -16,24 +16,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Hardcoded token configuration
-const TOKEN_CURRENCY = "GGK";
-const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+
+export interface TokenConfig {
+    currency: string;
+    issuer: string;
+}
 
 /**
  * Fetches all outstanding sell offers for the token and calculates the weighted average price.
  * Weighted average = sum(price_per_unit * quantity) / sum(quantity)
  */
-async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<number | null> {
+async function calculateWeightedAveragePrice(
+    client: xrpl.Client,
+    tokenConfig: TokenConfig
+): Promise<number | null> {
     try {
-        // Query the order book for GGK/XRP sell offers
-        // For sell offers: taker gets GGK tokens and pays XRP
+        // Query the order book for sell offers
+        // For sell offers: taker gets tokens and pays XRP
         const response = await client.request({
             command: "book_offers",
             taker_gets: {
-                currency: TOKEN_CURRENCY,
-                issuer: ISSUER_ADDRESS,
+                currency: tokenConfig.currency,
+                issuer: tokenConfig.issuer,
             },
             taker_pays: { currency: "XRP" },
             limit: 100, // Get up to 100 offers
@@ -49,7 +54,7 @@ async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<numbe
         let totalQuantity = 0;
 
         for (const offer of offers) {
-            // For sell offers: TakerGets is GGK tokens, TakerPays is XRP (in drops)
+            // For sell offers: TakerGets is tokens, TakerPays is XRP (in drops)
             const tokenAmount = typeof offer.TakerGets === "object" && "value" in offer.TakerGets
                 ? parseFloat(offer.TakerGets.value)
                 : 0;
@@ -80,6 +85,7 @@ async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<numbe
 
 interface SellOrderDialogProps {
     trigger?: React.ReactNode;
+    tokenConfig: TokenConfig;
 }
 
 interface FormErrors {
@@ -90,7 +96,7 @@ interface FormErrors {
     general?: string;
 }
 
-export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
+export function SellOrderDialog({ trigger, tokenConfig }: SellOrderDialogProps) {
     const [open, setOpen] = useState(false);
     const [apiKey, setApiKey] = useState("");
     const [quantity, setQuantity] = useState("");
@@ -189,8 +195,8 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                     TransactionType: "TrustSet",
                     Account: wallet.address,
                     LimitAmount: {
-                        currency: TOKEN_CURRENCY,
-                        issuer: ISSUER_ADDRESS,
+                        currency: tokenConfig.currency,
+                        issuer: tokenConfig.issuer,
                         value: "1000000000", // High limit to allow receiving tokens
                     },
                 };
@@ -239,9 +245,9 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                     Account: wallet.address,
                     TakerPays: totalDrops, // XRP in drops that seller wants
                     TakerGets: {
-                        currency: TOKEN_CURRENCY,
+                        currency: tokenConfig.currency,
                         value: quantity, // Number of GGK tokens seller is selling
-                        issuer: ISSUER_ADDRESS,
+                        issuer: tokenConfig.issuer,
                     },
                     Flags: 0, // Normal sell offer
                 };
@@ -273,6 +279,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                         .insert({
                             api_key: apiKey.trim(),
                             transaction_id: transactionId,
+                            token_type: tokenConfig.currency,
                         });
 
                     if (insertError) {
@@ -281,12 +288,12 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                     }
 
                     // Calculate and store the weighted average price
-                    const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+                    const weightedAvgPrice = await calculateWeightedAveragePrice(client, tokenConfig);
                     if (weightedAvgPrice !== null) {
                         const { error: priceInsertError } = await supabase
                             .from("token_prices")
                             .insert({
-                                token_name: TOKEN_CURRENCY,
+                                token_name: tokenConfig.currency,
                                 price: weightedAvgPrice,
                                 price_time: new Date().toISOString(),
                             });
@@ -343,7 +350,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                         <DialogHeader>
                             <DialogTitle>Create Sell Order</DialogTitle>
                             <DialogDescription>
-                                Sell your {TOKEN_CURRENCY} tokens on the XRP Ledger DEX.
+                                Sell your {tokenConfig.currency} tokens on the XRP Ledger DEX.
                             </DialogDescription>
                         </DialogHeader>
 
@@ -374,7 +381,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
 
                             <div className="grid gap-2">
                                 <Label htmlFor="quantity">
-                                    Quantity ({TOKEN_CURRENCY} tokens)
+                                    Quantity ({tokenConfig.currency} tokens)
                                 </Label>
                                 <Input
                                     id="quantity"
@@ -390,7 +397,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                                     <p className="text-sm text-destructive">{errors.quantity}</p>
                                 )}
                                 <p className="text-sm text-muted-foreground">
-                                    How many {TOKEN_CURRENCY} tokens you want to sell
+                                    How many {tokenConfig.currency} tokens you want to sell
                                 </p>
                             </div>
 
@@ -412,7 +419,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                                     </p>
                                 )}
                                 <p className="text-sm text-muted-foreground">
-                                    Price in XRP for each {TOKEN_CURRENCY} token
+                                    Price in XRP for each {tokenConfig.currency} token
                                 </p>
                             </div>
 
@@ -420,7 +427,7 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                                 <div className="rounded-md bg-muted p-3">
                                     <p className="text-sm font-medium">Order Summary</p>
                                     <p className="text-sm text-muted-foreground">
-                                        Selling {quantity} {TOKEN_CURRENCY} for {totalXrp()} XRP
+                                        Selling {quantity} {tokenConfig.currency} for {totalXrp()} XRP
                                         total
                                     </p>
                                 </div>
@@ -476,10 +483,10 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                                     Transaction Successful
                                 </p>
                                 <p className="mt-2 text-sm text-muted-foreground">
-                                    You received {quantity} {TOKEN_CURRENCY} tokens and created a sell order
+                                    You received {quantity} {tokenConfig.currency} tokens and created a sell order
                                 </p>
                                 <p className="text-sm text-muted-foreground">
-                                    Selling {quantity} {TOKEN_CURRENCY} at {pricePerUnit} XRP each
+                                    Selling {quantity} {tokenConfig.currency} at {pricePerUnit} XRP each
                                 </p>
                                 <p className="text-sm text-muted-foreground">
                                     Total: {totalXrp()} XRP

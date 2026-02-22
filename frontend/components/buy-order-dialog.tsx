@@ -16,13 +16,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Hardcoded token configuration
-const TOKEN_CURRENCY = "GGK";
-const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
 const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
+
+export interface TokenConfig {
+  currency: string;
+  issuer: string;
+}
 
 interface BuyOrderDialogProps {
   trigger?: React.ReactNode;
+  tokenConfig: TokenConfig;
 }
 
 interface FormErrors {
@@ -56,15 +59,18 @@ function generateProxyKey(): string {
 /**
  * Fetches the best sell offers from the order book
  */
-async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
-  console.log("[DEBUG] TOKEN_CURRENCY:", TOKEN_CURRENCY);
-  console.log("[DEBUG] ISSUER_ADDRESS:", ISSUER_ADDRESS);
-  // Query for sell offers: taker gets GGK tokens and pays XRP
+async function fetchBestSellOffers(
+  client: xrpl.Client,
+  tokenConfig: TokenConfig
+): Promise<SellOffer[]> {
+  console.log("[DEBUG] tokenConfig.currency:", tokenConfig.currency);
+  console.log("[DEBUG] tokenConfig.issuer:", tokenConfig.issuer);
+  // Query for sell offers: taker gets tokens and pays XRP
   const response = await client.request({
     command: "book_offers",
     taker_gets: {
-      currency: TOKEN_CURRENCY,
-      issuer: ISSUER_ADDRESS,
+      currency: tokenConfig.currency,
+      issuer: tokenConfig.issuer,
     },
     taker_pays: { currency: "XRP" },
     limit: 10,
@@ -75,7 +81,7 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
 
   return offers
     .map((offer) => {
-      // For sell offers: TakerGets is GGK (object), TakerPays is XRP (string, drops)
+      // For sell offers: TakerGets is tokens (object), TakerPays is XRP (string, drops)
       const tokenAmount = typeof offer.TakerGets === "object" && "value" in offer.TakerGets
         ? parseFloat(offer.TakerGets.value)
         : 0;
@@ -101,13 +107,16 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
 /**
  * Calculates the weighted average price from all sell offers
  */
-async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<number | null> {
+async function calculateWeightedAveragePrice(
+  client: xrpl.Client,
+  tokenConfig: TokenConfig
+): Promise<number | null> {
   try {
     const response = await client.request({
       command: "book_offers",
       taker_gets: {
-        currency: TOKEN_CURRENCY,
-        issuer: ISSUER_ADDRESS,
+        currency: tokenConfig.currency,
+        issuer: tokenConfig.issuer,
       },
       taker_pays: { currency: "XRP" },
       limit: 100,
@@ -148,7 +157,7 @@ async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<numbe
   }
 }
 
-export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
+export function BuyOrderDialog({ trigger, tokenConfig }: BuyOrderDialogProps) {
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [secret, setSecret] = useState("");
@@ -169,14 +178,14 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
     if (open) {
       fetchOffers();
     }
-  }, [open]);
+  }, [open, tokenConfig]);
 
   const fetchOffers = async () => {
     setIsFetchingOffers(true);
     const client = new xrpl.Client(XRPL_SERVER);
     try {
       await client.connect();
-      const offers = await fetchBestSellOffers(client);
+      const offers = await fetchBestSellOffers(client, tokenConfig);
       if (offers.length > 0) {
         setBestOffer(offers[0]);
       } else {
@@ -264,8 +273,8 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         TransactionType: "TrustSet",
         Account: wallet.address,
         LimitAmount: {
-          currency: TOKEN_CURRENCY,
-          issuer: ISSUER_ADDRESS,
+          currency: tokenConfig.currency,
+          issuer: tokenConfig.issuer,
           value: "1000000000", // High limit to allow receiving tokens
         },
       };
@@ -292,9 +301,9 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         Account: wallet.address,
         TakerGets: totalDrops, // XRP in drops that buyer is offering
         TakerPays: {
-          currency: TOKEN_CURRENCY,
+          currency: tokenConfig.currency,
           value: quantity,
-          issuer: ISSUER_ADDRESS,
+          issuer: tokenConfig.issuer,
         }, // GGK tokens that buyer wants
         Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
       };
@@ -323,11 +332,11 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         const burnTx: xrpl.Payment = {
           TransactionType: "Payment",
           Account: wallet.address,
-          Destination: ISSUER_ADDRESS,
+          Destination: tokenConfig.issuer,
           Amount: {
-            currency: TOKEN_CURRENCY,
+            currency: tokenConfig.currency,
             value: quantity,
-            issuer: ISSUER_ADDRESS,
+            issuer: tokenConfig.issuer,
           },
         };
 
@@ -345,24 +354,27 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
 
         console.log("[DEBUG] Tokens burned successfully");
 
-        // 2. Find the real API key from api_key_transactions for this token
+        // 2. Find the real API key from api_key_transactions for this token type
         const { data: apiKeyTx } = await supabase
           .from("api_key_transactions")
           .select("api_key")
+          .eq("token_type", tokenConfig.currency)
           .limit(1)
-          .single();
+          .maybeSingle();
 
         const realApiKey = apiKeyTx?.api_key || "no_real_key_available";
 
         // 3. Generate a proxy key
         const proxyKey = generateProxyKey();
 
-        // 4. Store the proxy key mapping
+        // 4. Store the proxy key mapping with token type and user_id
         const { error: proxyInsertError } = await supabase
           .from("proxy_api_keys")
           .insert({
             proxy_key: proxyKey,
             real_key: realApiKey,
+            token_type: tokenConfig.currency,
+            user_id: user.id,
           });
 
         if (proxyInsertError) {
@@ -374,7 +386,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
           .from("user_api_tokens")
           .select("id, token_amount")
           .eq("user_id", user.id)
-          .eq("token_name", TOKEN_CURRENCY)
+          .eq("token_name", tokenConfig.currency)
           .maybeSingle();
 
         if (selectError) {
@@ -401,7 +413,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
           // Insert new record
           const { error: insertError } = await supabase.from("user_api_tokens").insert({
             user_id: user.id,
-            token_name: TOKEN_CURRENCY,
+            token_name: tokenConfig.currency,
             token_amount: qty,
           });
 
@@ -413,12 +425,12 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         }
 
         // Calculate and store the weighted average price
-        const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+        const weightedAvgPrice = await calculateWeightedAveragePrice(client, tokenConfig);
         if (weightedAvgPrice !== null) {
           const { error: priceInsertError } = await supabase
             .from("token_prices")
             .insert({
-              token_name: TOKEN_CURRENCY,
+              token_name: tokenConfig.currency,
               price: weightedAvgPrice,
               price_time: new Date().toISOString(),
             });
@@ -476,7 +488,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         {step === "form" && (
           <>
             <DialogHeader>
-              <DialogTitle>Buy {TOKEN_CURRENCY} Tokens</DialogTitle>
+              <DialogTitle>Buy {tokenConfig.currency} Tokens</DialogTitle>
               <DialogDescription>
                 Purchase tokens from the XRP Ledger DEX and get a proxy API key.
               </DialogDescription>
@@ -512,7 +524,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
 
               <div className="grid gap-2">
                 <Label htmlFor="buyQuantity">
-                  Quantity ({TOKEN_CURRENCY} tokens)
+                  Quantity ({tokenConfig.currency} tokens)
                 </Label>
                 <Input
                   id="buyQuantity"
@@ -535,7 +547,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
                 <div className="rounded-md bg-green-500/10 p-3">
                   <p className="text-sm font-medium">Order Summary</p>
                   <p className="text-sm text-muted-foreground">
-                    Buying {quantity} {TOKEN_CURRENCY} for {estimatedCost()} XRP
+                    Buying {quantity} {tokenConfig.currency} for {estimatedCost()} XRP
                   </p>
                 </div>
               )}
@@ -594,7 +606,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
                   Transaction Successful
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Purchased {txResult.tokensReceived} {TOKEN_CURRENCY} tokens
+                  Purchased {txResult.tokensReceived} {tokenConfig.currency} tokens
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Paid: {txResult.xrpPaid.toFixed(6)} XRP

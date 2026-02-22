@@ -4,6 +4,11 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { BuyOrderDialog } from '@/components/buy-order-dialog'
 import { SellOrderDialog } from '@/components/sell-order-dialog'
 
+const TOKEN_CONFIG = {
+  currency: "GGK",
+  issuer: "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE",
+};
+
 export function SiteHeader() {
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
@@ -16,6 +21,7 @@ export function SiteHeader() {
         <h1 className="text-base font-medium">Documents</h1>
         <div className="ml-auto flex items-center gap-2">
           <BuyOrderDialog
+            tokenConfig={TOKEN_CONFIG}
             trigger={
               <Button size="sm" className="bg-green-600 hover:bg-green-700">
                 Buy Tokens
@@ -23,6 +29,7 @@ export function SiteHeader() {
             }
           />
           <SellOrderDialog
+            tokenConfig={TOKEN_CONFIG}
             trigger={
               <Button variant="default" size="sm">
                 Sell Tokens

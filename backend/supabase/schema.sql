@@ -118,12 +118,13 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- wallets: billing wallets per user (name + wallet_id)
+-- wallets: billing wallets per user (name + wallet_id + wallet_secret)
 CREATE TABLE IF NOT EXISTS wallets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   wallet_id TEXT NOT NULL,
+  wallet_secret TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -215,16 +216,20 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- wallets: billing wallets per user (name + wallet_id)
+-- wallets: billing wallets per user (name + wallet_id + wallet_secret)
 CREATE TABLE IF NOT EXISTS wallets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   wallet_id TEXT NOT NULL,
+  wallet_secret TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_wallets_user ON wallets(user_id);
+
+-- Add wallet_secret column for existing DBs that had wallets before this migration
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS wallet_secret TEXT;
 
 -- RLS: users can only read/update/insert their own row
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;

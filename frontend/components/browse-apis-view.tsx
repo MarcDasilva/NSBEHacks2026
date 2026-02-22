@@ -239,7 +239,7 @@ export function BrowseApisView() {
             <div className="min-h-[320px] p-6">
               {/* Graph placeholder — replace with actual chart component when ready */}
               <div className="flex h-full min-h-[280px] w-full items-center justify-center rounded-md bg-sidebar-accent/30 text-sidebar-foreground/60" style={{ fontFamily: "var(--font-geist-sans)" }}>
-                Chart for {selectedTicker.symbol} will display here
+                Coming Soon...
               </div>
             </div>
           </section>

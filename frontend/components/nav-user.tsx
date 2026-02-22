@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useRef } from "react"
 import {
-  IconCreditCard,
+  IconWallet,
   IconDotsVertical,
   IconEye,
   IconEyeOff,
@@ -46,7 +46,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 
-type WalletEntry = { id: string; name: string }
+type WalletEntry = { id: string; name: string; walletSecret: string }
 
 export function NavUser({
   user,
@@ -70,12 +70,22 @@ export function NavUser({
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [wallets, setWallets] = useState<WalletEntry[]>([])
   const [visibleWalletIds, setVisibleWalletIds] = useState<Set<number>>(new Set())
+  const [visibleWalletSecretIds, setVisibleWalletSecretIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const toggleWalletIdVisible = (index: number) => {
     setVisibleWalletIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const toggleWalletSecretVisible = (index: number) => {
+    setVisibleWalletSecretIds((prev) => {
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
       else next.add(index)
@@ -107,7 +117,7 @@ export function NavUser({
     if (!authUser?.id) return
     const { data: rows, error } = await supabase
       .from("wallets")
-      .select("name, wallet_id")
+      .select("name, wallet_id, wallet_secret")
       .eq("user_id", authUser.id)
       .order("created_at")
     if (error) {
@@ -115,7 +125,11 @@ export function NavUser({
       return
     }
     setWallets(
-      (rows ?? []).map((r) => ({ name: r.name ?? "", id: r.wallet_id ?? "" }))
+      (rows ?? []).map((r) => ({
+        name: r.name ?? "",
+        id: r.wallet_id ?? "",
+        walletSecret: r.wallet_secret ?? "",
+      }))
     )
   }, [])
 
@@ -139,10 +153,10 @@ export function NavUser({
   }
 
   const addWallet = () => {
-    setWallets((prev) => [...prev, { id: "", name: "" }])
+    setWallets((prev) => [...prev, { id: "", name: "", walletSecret: "" }])
   }
 
-  const updateWallet = (index: number, field: "id" | "name", value: string) => {
+  const updateWallet = (index: number, field: "id" | "name" | "walletSecret", value: string) => {
     setWallets((prev) =>
       prev.map((w, i) => (i === index ? { ...w, [field]: value } : w))
     )
@@ -233,6 +247,7 @@ export function NavUser({
             user_id: authUser.id,
             name: w.name.trim() || "Unnamed",
             wallet_id: w.id.trim(),
+            wallet_secret: w.walletSecret?.trim() || null,
           }))
         )
         if (insertError) throw insertError
@@ -295,8 +310,8 @@ export function NavUser({
                 Account
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setBillingOpen(true)}>
-                <IconCreditCard />
-                Billing
+                <IconWallet />
+                Wallets
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <IconNotification />
@@ -393,14 +408,14 @@ export function NavUser({
           </DialogContent>
         </Dialog>
 
-        {/* Billing dialog: wallets only — Geist (package) font, Name above Wallet ID */}
+        {/* Wallets dialog — Geist (package) font, Name above Wallet ID */}
         <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
           <DialogContent
             className="sm:max-w-md [font-family:var(--font-geist-sans)]"
           >
             <DialogHeader>
               <DialogTitle className="[font-family:var(--font-geist-sans)]">
-                Billing
+                Wallets
               </DialogTitle>
               <DialogDescription className="[font-family:var(--font-geist-sans)]">
                 Manage your wallet IDs for payments.
@@ -490,6 +505,40 @@ export function NavUser({
                                 {visibleWalletIds.has(index)
                                   ? "Hide wallet ID"
                                   : "Show wallet ID"}
+                              </span>
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label className="text-xs [font-family:var(--font-geist-sans)]">
+                            Wallet secret
+                          </Label>
+                          <div className="relative flex items-center">
+                            <Input
+                              type={visibleWalletSecretIds.has(index) ? "text" : "password"}
+                              value={wallet.walletSecret}
+                              onChange={(e) =>
+                                updateWallet(index, "walletSecret", e.target.value)
+                              }
+                              placeholder="Wallet secret key"
+                              className="rounded-md pr-9 text-sm [font-family:var(--font-geist-sans)]"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-0 top-0 h-full shrink-0 text-muted-foreground hover:text-foreground [font-family:var(--font-geist-sans)]"
+                              onClick={() => toggleWalletSecretVisible(index)}
+                            >
+                              {visibleWalletSecretIds.has(index) ? (
+                                <IconEyeOff className="size-4" aria-hidden />
+                              ) : (
+                                <IconEye className="size-4" aria-hidden />
+                              )}
+                              <span className="sr-only">
+                                {visibleWalletSecretIds.has(index)
+                                  ? "Hide wallet secret"
+                                  : "Show wallet secret"}
                               </span>
                             </Button>
                           </div>

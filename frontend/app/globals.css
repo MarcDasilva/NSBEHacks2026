@@ -124,3 +124,30 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+/* React Flow Controls (plus/minus/fit) dark theme */
+.dark-flow-controls,
+.dark-flow-controls button,
+.react-flow__controls button {
+  background: #252525 !important;
+  border-color: #404040 !important;
+  color: #e5e5e5 !important;
+  fill: #e5e5e5 !important;
+}
+.dark-flow-controls button:hover,
+.react-flow__controls button:hover {
+  background: #333 !important;
+  color: #fff !important;
+  fill: #fff !important;
+}
+.react-flow.dark .react-flow__controls button {
+  background: #252525 !important;
+  border-color: #404040 !important;
+  color: #e5e5e5 !important;
+  fill: #e5e5e5 !important;
+}
+.react-flow.dark .react-flow__controls button:hover {
+  background: #333 !important;
+  color: #fff !important;
+  fill: #fff !important;
+}

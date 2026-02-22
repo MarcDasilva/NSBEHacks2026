@@ -10,13 +10,10 @@ import {
 } from "@/contexts/PostLoginPhaseContext";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BrowseApisView } from "@/components/browse-apis-view";
-import { ChartAreaInteractive } from "@/components/chart-area-interactive";
-import { DataTable } from "@/components/data-table";
-import { SectionCards } from "@/components/section-cards";
+import { DashboardFlowView } from "@/components/dashboard-flow-view";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import data from "./data.json";
 
 const WELCOME_DURATION = 3.5;
 
@@ -218,7 +215,7 @@ export default function DashboardPage() {
                 setUserInfo((prev) =>
                   prev
                     ? { ...prev, name: updates.name, avatar: updates.avatar }
-                    : null
+                    : null,
                 )
               }
               onNavigate={setMainView}
@@ -226,21 +223,13 @@ export default function DashboardPage() {
             />
             <SidebarInset className="bg-transparent min-h-0 flex flex-1 flex-col overflow-hidden">
               <SiteHeader
-                title={mainView === "browse" ? "Browse APIs" : "Dashboard"}
+                title={mainView === "browse" ? "Browse APIs" : "Connections"}
               />
               {mainView === "browse" ? (
                 <BrowseApisView />
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                  <div className="@container/main flex flex-1 flex-col gap-2">
-                    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-                      <SectionCards />
-                      <div className="px-4 lg:px-6">
-                        <ChartAreaInteractive />
-                      </div>
-                      <DataTable data={data} />
-                    </div>
-                  </div>
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <DashboardFlowView />
                 </div>
               )}
             </SidebarInset>

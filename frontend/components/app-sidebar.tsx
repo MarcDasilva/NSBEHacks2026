@@ -4,12 +4,12 @@ import * as React from "react";
 import {
   IconCamera,
   IconChartBar,
-  IconDashboard,
   IconDatabase,
   IconFileAi,
   IconFileDescription,
   IconHelp,
   IconListDetails,
+  IconPlugConnected,
   IconReport,
   IconSearch,
   IconSettings,
@@ -38,9 +38,9 @@ const data = {
   },
   navMain: [
     {
-      title: "Dashboard",
+      title: "Connections",
       url: "#",
-      icon: IconDashboard,
+      icon: IconPlugConnected,
     },
     {
       title: "Lifecycle",
@@ -193,7 +193,7 @@ export function AppSidebar({
           onNavItemClick={
             onNavigate
               ? (title) => {
-                  if (title === "Dashboard") onNavigate("dashboard");
+                  if (title === "Connections") onNavigate("dashboard");
                 }
               : undefined
           }

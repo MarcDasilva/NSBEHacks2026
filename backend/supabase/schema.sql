@@ -307,3 +307,26 @@ CREATE INDEX IF NOT EXISTS idx_ticker_news_ticker_id ON ticker_news(ticker_id);
 ALTER TABLE ticker_news ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "ticker_news_select_all" ON ticker_news;
 CREATE POLICY "ticker_news_select_all" ON ticker_news FOR SELECT USING (true);
+
+-- user_connection_graphs: saved connection flow (nodes, edges, positions) for later reference.
+CREATE TABLE IF NOT EXISTS user_connection_graphs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT,
+  nodes JSONB NOT NULL DEFAULT '[]',
+  edges JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_connection_graphs_user ON user_connection_graphs(user_id);
+
+ALTER TABLE user_connection_graphs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "user_connection_graphs_select_own" ON user_connection_graphs;
+DROP POLICY IF EXISTS "user_connection_graphs_insert_own" ON user_connection_graphs;
+DROP POLICY IF EXISTS "user_connection_graphs_update_own" ON user_connection_graphs;
+DROP POLICY IF EXISTS "user_connection_graphs_delete_own" ON user_connection_graphs;
+CREATE POLICY "user_connection_graphs_select_own" ON user_connection_graphs FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "user_connection_graphs_insert_own" ON user_connection_graphs FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "user_connection_graphs_update_own" ON user_connection_graphs FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "user_connection_graphs_delete_own" ON user_connection_graphs FOR DELETE USING (auth.uid() = user_id);

@@ -3,6 +3,14 @@ import { db } from "./database";
 import { count_api_keys, get_real_key } from "./db/queries_sql";
 import { fetch } from "bun";
 import xrpl, { Wallet } from "xrpl";
+import {
+    recordDeposit,
+    reportUsage,
+    getPaymentStatus,
+    refundUnused,
+    getSellerPayments,
+    getBuyerPayments,
+} from "./payments";
 
 const XRPL_URL = process.env.XRPL_URL || "wss://s.altnet.rippletest.net:51233";
 const ISSUER_SECRET = process.env.ISSUER_SECRET || "";
@@ -167,6 +175,89 @@ const app = new Elysia()
             };
         } catch (err: any) {
             return { error: err.message || "Failed to issue AIK tokens" };
+        }
+    })
+    // ── Payments (Escrow) endpoints ───────────────────
+    .post("/payments/deposit", async ({ body }) => {
+        const { buyerWallet, sellerWallet, listingId, depositTxHash, depositAmountXrp, pricePerCallXrp, expiresInHours } =
+            body as {
+                buyerWallet: string;
+                sellerWallet: string;
+                listingId: string;
+                depositTxHash: string;
+                depositAmountXrp: number;
+                pricePerCallXrp: number;
+                expiresInHours?: number;
+            };
+
+        if (!buyerWallet || !sellerWallet || !listingId || !depositTxHash || depositAmountXrp === undefined || pricePerCallXrp === undefined) {
+            return { error: "Missing required fields: buyerWallet, sellerWallet, listingId, depositTxHash, depositAmountXrp, pricePerCallXrp" };
+        }
+
+        try {
+            const payment = await recordDeposit({ buyerWallet, sellerWallet, listingId, depositTxHash, depositAmountXrp, pricePerCallXrp, expiresInHours });
+            return { success: true, payment };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    })
+    .post("/payments/usage/report", async ({ body }) => {
+        const { listingId, buyerWallet, callsReported, idempotencyKey, hmacSignature } =
+            body as {
+                listingId: string;
+                buyerWallet: string;
+                callsReported: number;
+                idempotencyKey: string;
+                hmacSignature: string;
+            };
+
+        if (!listingId || !buyerWallet || callsReported === undefined || !idempotencyKey || !hmacSignature) {
+            return { error: "Missing required fields: listingId, buyerWallet, callsReported, idempotencyKey, hmacSignature" };
+        }
+
+        try {
+            const usageLog = await reportUsage({ listingId, buyerWallet, callsReported, idempotencyKey, hmacSignature });
+            return { success: true, usageLog };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    })
+    .get("/payments/status/:listingId/:buyerWallet", async ({ params }) => {
+        try {
+            const result = await getPaymentStatus(params.listingId, params.buyerWallet);
+            return { success: true, ...result };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    })
+    .post("/payments/refund", async ({ body }) => {
+        const { listingId, buyerWallet } = body as { listingId: string; buyerWallet: string };
+
+        if (!listingId || !buyerWallet) {
+            return { error: "Missing required fields: listingId, buyerWallet" };
+        }
+
+        try {
+            const result = await refundUnused(listingId, buyerWallet);
+            return { success: true, ...result };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    })
+    .get("/payments/seller/:wallet", async ({ params }) => {
+        try {
+            const payments = await getSellerPayments(params.wallet);
+            return { success: true, payments };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    })
+    .get("/payments/buyer/:wallet", async ({ params }) => {
+        try {
+            const payments = await getBuyerPayments(params.wallet);
+            return { success: true, payments };
+        } catch (err: any) {
+            return { error: err.message };
         }
     })
     .listen(3000);

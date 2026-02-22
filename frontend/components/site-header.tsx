@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+import { BuyOrderDialog } from '@/components/buy-order-dialog'
+import { SellOrderDialog } from '@/components/sell-order-dialog'
 
 export function SiteHeader() {
   return (
@@ -13,6 +15,20 @@ export function SiteHeader() {
         />
         <h1 className="text-base font-medium">Documents</h1>
         <div className="ml-auto flex items-center gap-2">
+          <BuyOrderDialog
+            trigger={
+              <Button size="sm" className="bg-green-600 hover:bg-green-700">
+                Buy Tokens
+              </Button>
+            }
+          />
+          <SellOrderDialog
+            trigger={
+              <Button variant="default" size="sm">
+                Sell Tokens
+              </Button>
+            }
+          />
           <Button variant="ghost" asChild size="sm" className="hidden sm:flex">
             <a
               href="https://github.com/shadcn-ui/ui/tree/main/apps/v4/app/(examples)/dashboard"

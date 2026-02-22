@@ -9,6 +9,7 @@ import {
   FADE_DURATION,
 } from "@/contexts/PostLoginPhaseContext";
 import { AppSidebar } from "@/components/app-sidebar";
+import { BrowseApisView } from "@/components/browse-apis-view";
 import { ChartAreaInteractive } from "@/components/chart-area-interactive";
 import { DataTable } from "@/components/data-table";
 import { SectionCards } from "@/components/section-cards";
@@ -124,6 +125,7 @@ export default function DashboardPage() {
 
   const showWelcome = phase === "welcome" || phase === "fading";
   const showDashboard = phase === "done" && userInfo;
+  const [mainView, setMainView] = useState<"browse" | "dashboard">("browse");
 
   // Fade up dashboard when it mounts (phase === "done"), same style as landing page
   useEffect(() => {
@@ -201,7 +203,7 @@ export default function DashboardPage() {
           }}
         >
           <SidebarProvider
-            className="bg-transparent!"
+            className="bg-transparent! h-svh overflow-hidden"
             style={
               {
                 "--sidebar-width": "calc(var(--spacing) * 72)",
@@ -219,21 +221,28 @@ export default function DashboardPage() {
                     : null
                 )
               }
+              onNavigate={setMainView}
               variant="inset"
             />
-            <SidebarInset className="bg-transparent">
-              <SiteHeader />
-              <div className="flex flex-1 flex-col">
-                <div className="@container/main flex flex-1 flex-col gap-2">
-                  <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-                    <SectionCards />
-                    <div className="px-4 lg:px-6">
-                      <ChartAreaInteractive />
+            <SidebarInset className="bg-transparent min-h-0 flex flex-1 flex-col overflow-hidden">
+              <SiteHeader
+                title={mainView === "browse" ? "Browse APIs" : "Dashboard"}
+              />
+              {mainView === "browse" ? (
+                <BrowseApisView />
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  <div className="@container/main flex flex-1 flex-col gap-2">
+                    <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+                      <SectionCards />
+                      <div className="px-4 lg:px-6">
+                        <ChartAreaInteractive />
+                      </div>
+                      <DataTable data={data} />
                     </div>
-                    <DataTable data={data} />
                   </div>
                 </div>
-              </div>
+              )}
             </SidebarInset>
             <Toaster />
           </SidebarProvider>

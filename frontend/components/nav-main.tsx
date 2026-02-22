@@ -13,12 +13,16 @@ import {
 
 export function NavMain({
   items,
+  onBrowseApisClick,
+  onNavItemClick,
 }: {
   items: {
     title: string
     url: string
     icon?: Icon
   }[]
+  onBrowseApisClick?: () => void
+  onNavItemClick?: (title: string) => void
 }) {
   return (
     <SidebarGroup>
@@ -28,9 +32,19 @@ export function NavMain({
             <SidebarMenuButton
               tooltip="Browse APIs"
               className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground min-w-8 duration-200 ease-linear"
+              asChild={!!onBrowseApisClick}
             >
-              <IconServer />
-              <span>Browse APIs</span>
+              {onBrowseApisClick ? (
+                <button type="button" onClick={onBrowseApisClick}>
+                  <IconServer />
+                  <span>Browse APIs</span>
+                </button>
+              ) : (
+                <>
+                  <IconServer />
+                  <span>Browse APIs</span>
+                </>
+              )}
             </SidebarMenuButton>
             <Button
               size="icon"
@@ -45,9 +59,24 @@ export function NavMain({
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title}>
-                {item.icon && <item.icon />}
-                <span>{item.title}</span>
+              <SidebarMenuButton
+                tooltip={item.title}
+                asChild={!!onNavItemClick}
+              >
+                {onNavItemClick ? (
+                  <button
+                    type="button"
+                    onClick={() => onNavItemClick(item.title)}
+                  >
+                    {item.icon && <item.icon />}
+                    <span>{item.title}</span>
+                  </button>
+                ) : (
+                  <>
+                    {item.icon && <item.icon />}
+                    <span>{item.title}</span>
+                  </>
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}

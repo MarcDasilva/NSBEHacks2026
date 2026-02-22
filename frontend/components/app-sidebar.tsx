@@ -147,11 +147,13 @@ export function AppSidebar({
   user,
   onLogout,
   onAccountSaved,
+  onNavigate,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   user: NavUserData
   onLogout?: () => void
   onAccountSaved?: (updates: { name: string; avatar: string }) => void
+  onNavigate?: (view: "browse" | "dashboard") => void
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -183,7 +185,17 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain
+          items={data.navMain}
+          onBrowseApisClick={onNavigate ? () => onNavigate("browse") : undefined}
+          onNavItemClick={
+            onNavigate
+              ? (title) => {
+                  if (title === "Dashboard") onNavigate("dashboard")
+                }
+              : undefined
+          }
+        />
         <NavDocuments items={data.documents} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>

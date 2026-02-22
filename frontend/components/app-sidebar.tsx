@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   IconCamera,
   IconChartBar,
@@ -14,12 +14,12 @@ import {
   IconSearch,
   IconSettings,
   IconUsers,
-} from "@tabler/icons-react"
+} from "@tabler/icons-react";
 
-import { NavDocuments } from '@/components/nav-documents'
-import { NavMain } from '@/components/nav-main'
-import { NavSecondary } from '@/components/nav-secondary'
-import { NavUser } from '@/components/nav-user'
+import { NavDocuments } from "@/components/nav-documents";
+import { NavMain } from "@/components/nav-main";
+import { NavSecondary } from "@/components/nav-secondary";
+import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
   SidebarContent,
@@ -28,7 +28,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@/components/ui/sidebar'
+} from "@/components/ui/sidebar";
 
 const data = {
   user: {
@@ -135,13 +135,13 @@ const data = {
       icon: IconReport,
     },
   ],
-}
+};
 
 type NavUserData = {
-  name: string
-  email: string
-  avatar: string
-}
+  name: string;
+  email: string;
+  avatar: string;
+};
 
 export function AppSidebar({
   user,
@@ -150,10 +150,10 @@ export function AppSidebar({
   onNavigate,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
-  user: NavUserData
-  onLogout?: () => void
-  onAccountSaved?: (updates: { name: string; avatar: string }) => void
-  onNavigate?: (view: "browse" | "dashboard") => void
+  user: NavUserData;
+  onLogout?: () => void;
+  onAccountSaved?: (updates: { name: string; avatar: string }) => void;
+  onNavigate?: (view: "browse" | "dashboard") => void;
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -187,11 +187,13 @@ export function AppSidebar({
       <SidebarContent>
         <NavMain
           items={data.navMain}
-          onBrowseApisClick={onNavigate ? () => onNavigate("browse") : undefined}
+          onBrowseApisClick={
+            onNavigate ? () => onNavigate("browse") : undefined
+          }
           onNavItemClick={
             onNavigate
               ? (title) => {
-                  if (title === "Dashboard") onNavigate("dashboard")
+                  if (title === "Dashboard") onNavigate("dashboard");
                 }
               : undefined
           }
@@ -200,8 +202,12 @@ export function AppSidebar({
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} onLogout={onLogout} onAccountSaved={onAccountSaved} />
+        <NavUser
+          user={user}
+          onLogout={onLogout}
+          onAccountSaved={onAccountSaved}
+        />
       </SidebarFooter>
     </Sidebar>
-  )
+  );
 }

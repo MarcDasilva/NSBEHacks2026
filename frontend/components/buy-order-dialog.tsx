@@ -15,11 +15,42 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  recordBurnOnEVM,
+  tokenAmountToWei,
+  type RecordBurnOnEVMResult,
+} from "@/lib/evm-burn-registry";
 
 // Hardcoded token configuration
 const TOKEN_CURRENCY = "GGK";
 const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
 const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
+
+/** Map XRPL transaction result codes to user-friendly messages. */
+function formatTransactionError(code: string): string {
+  switch (code) {
+    case "tecKILLED":
+      return "Order could not be filled (not enough liquidity or the best offer was taken). Try a smaller quantity or try again.";
+    case "tecPATH_DRY":
+      return "No liquidity path for this trade. The order book may be empty or the price moved.";
+    case "tecUNFUNDED_OFFER":
+      return "Insufficient XRP balance to place this order.";
+    case "tecUNFUNDED":
+    case "tecINSUFFICIENT_FUNDS":
+      return "Insufficient XRP balance (including reserve).";
+    case "tecNO_LINE":
+      return "Trust line is required; setup may have failed. Try again.";
+    default:
+      return `Transaction failed: ${code}`;
+  }
+}
 
 interface BuyOrderDialogProps {
   trigger?: React.ReactNode;
@@ -30,6 +61,7 @@ interface BuyOrderDialogProps {
 
 interface FormErrors {
   quantity?: string;
+  wallet?: string;
   secret?: string;
   general?: string;
 }
@@ -71,7 +103,7 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
       issuer: ISSUER_ADDRESS,
     },
     taker_pays: { currency: "XRP" },
-    limit: 10,
+    limit: 50,
   });
 
   const offers = response.result.offers || [];
@@ -90,18 +122,291 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
 
       if (tokenAmount <= 0 || xrpAmount <= 0) return null;
 
+      const takerGetsValue =
+        typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+          ? String(offer.TakerGets.value)
+          : String(tokenAmount);
       return {
         offerId: offer.index || "",
         account: offer.Account,
         quantity: tokenAmount,
         pricePerUnit: xrpAmount / tokenAmount,
         totalXrp: xrpAmount,
-        takerGetsValue: offer.TakerGets.value,
+        takerGetsValue,
         takerPaysDrops: xrpDrops,
       };
     })
     .filter((o): o is SellOffer => o !== null)
     .sort((a, b) => a.pricePerUnit - b.pricePerUnit);
+}
+
+/**
+ * Compute XRP cost to fill `requestedQty` by walking best offers first (XRPL order book fill).
+ * Returns total XRP cost and the quantity we can fill; if filledQty < requestedQty, not enough liquidity.
+ */
+function computeFillAcrossOffers(
+  offers: SellOffer[],
+  requestedQty: number,
+): { totalXrpCost: number; filledQty: number } {
+  let remaining = requestedQty;
+  let totalXrpCost = 0;
+  for (const o of offers) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, o.quantity);
+    totalXrpCost += take * o.pricePerUnit;
+    remaining -= take;
+  }
+  const filledQty = requestedQty - remaining;
+  return { totalXrpCost, filledQty };
+}
+
+/**
+ * Weighted average of sell offers (same book as fetchBestSellOffers): XRP per token.
+ */
+async function calculateWeightedAveragePrice(
+  client: xrpl.Client,
+): Promise<number | null> {
+  try {
+    const response = await client.request({
+      command: "book_offers",
+      taker_gets: { currency: "XRP" },
+      taker_pays: {
+        currency: TOKEN_CURRENCY,
+        issuer: ISSUER_ADDRESS,
+      },
+      limit: 100,
+    });
+    const offers = response.result.offers;
+    if (!offers || offers.length === 0) return null;
+    let totalWeightedPrice = 0;
+    let totalQuantity = 0;
+    for (const offer of offers) {
+      const xrpDrops =
+        typeof offer.TakerGets === "string" ? parseFloat(offer.TakerGets) : 0;
+      const xrpAmount = xrpDrops / 1_000_000;
+      const tokenAmount =
+        typeof offer.TakerPays === "object" && "value" in offer.TakerPays
+          ? parseFloat(offer.TakerPays.value)
+          : 0;
+      if (tokenAmount > 0 && xrpAmount > 0) {
+        const pricePerUnit = xrpAmount / tokenAmount;
+        totalWeightedPrice += pricePerUnit * tokenAmount;
+        totalQuantity += tokenAmount;
+      }
+    }
+    return totalQuantity === 0 ? null : totalWeightedPrice / totalQuantity;
+  } catch (error) {
+    console.error("Error calculating weighted average price:", error);
+    return null;
+  }
+}
+
+export type BuyOrderResult = {
+  hash: string;
+  proxyKey: string;
+  tokensReceived: number;
+  xrpPaid: number;
+  /** XRPL L1 burn tx hash (Payment to issuer) for on-chain registry (EVM). */
+  burnHash: string;
+};
+
+/**
+ * Execute a buy order using the given quantity and wallet secret.
+ * Fetches best offer, sets trust line, creates offer, burns tokens, stores proxy key and balance.
+ * Use this from the graph panel (no dialog) or from the dialog.
+ * @param walletId Optional wallet_id to link the proxy key to (for Order Book per-wallet buy orders).
+ */
+export async function executeBuyOrder(
+  quantity: string,
+  secret: string,
+  walletId?: string,
+): Promise<BuyOrderResult> {
+  const qty = parseFloat(quantity);
+  if (!quantity || isNaN(qty) || qty <= 0) {
+    throw new Error("Please enter a valid quantity greater than 0");
+  }
+  if (!secret || secret.trim().length < 20) {
+    throw new Error("Please enter a valid wallet secret");
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) throw new Error("Supabase client not available");
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("User not authenticated");
+
+  let wallet: xrpl.Wallet;
+  try {
+    wallet = xrpl.Wallet.fromSeed(secret.trim());
+  } catch {
+    throw new Error("Invalid wallet secret");
+  }
+
+  const client = new xrpl.Client(XRPL_SERVER);
+  await client.connect();
+  try {
+    const getOffers = async () => fetchBestSellOffers(client);
+
+    let offers = await getOffers();
+    if (offers.length === 0) throw new Error("No sell offers available");
+
+    let { totalXrpCost, filledQty } = computeFillAcrossOffers(offers, qty);
+    if (filledQty < qty) {
+      throw new Error(
+        `Not enough liquidity. Available: ${filledQty.toLocaleString()} tokens across the order book.`,
+      );
+    }
+
+    const trustSetTx: xrpl.TrustSet = {
+      TransactionType: "TrustSet",
+      Account: wallet.address,
+      LimitAmount: {
+        currency: TOKEN_CURRENCY,
+        issuer: ISSUER_ADDRESS,
+        value: "1000000000",
+      },
+    };
+    const preparedTrust = await client.autofill(trustSetTx);
+    const signedTrust = wallet.sign(preparedTrust);
+    const trustResult = await client.submitAndWait(signedTrust.tx_blob);
+    const trustMeta = trustResult.result.meta as xrpl.TransactionMetadata;
+    if (
+      typeof trustMeta === "object" &&
+      trustMeta.TransactionResult !== "tesSUCCESS" &&
+      trustMeta.TransactionResult !== "tecDUPLICATE"
+    ) {
+      throw new Error(
+        `Failed to set up trust line: ${trustMeta.TransactionResult}`,
+      );
+    }
+
+    let result!: Awaited<ReturnType<xrpl.Client["submitAndWait"]>>;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        offers = await getOffers();
+        if (offers.length === 0) {
+          throw new Error(
+            "Order could not be filled (no offers available). Try again.",
+          );
+        }
+        const refill = computeFillAcrossOffers(offers, qty);
+        if (refill.filledQty < qty) {
+          throw new Error(
+            `Order could not be filled (not enough liquidity). Available: ${refill.filledQty.toLocaleString()} tokens. Try a smaller quantity or try again.`,
+          );
+        }
+        totalXrpCost = refill.totalXrpCost;
+      }
+      const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
+      const offerCreateTx: xrpl.OfferCreate = {
+        TransactionType: "OfferCreate",
+        Account: wallet.address,
+        TakerGets: totalDrops,
+        TakerPays: {
+          currency: TOKEN_CURRENCY,
+          value: quantity,
+          issuer: ISSUER_ADDRESS,
+        },
+        Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
+      };
+      const prepared = await client.autofill(offerCreateTx);
+      const signed = wallet.sign(prepared);
+      result = await client.submitAndWait(signed.tx_blob);
+      const meta = result.result.meta as xrpl.TransactionMetadata;
+      if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS")
+        break;
+      const err =
+        typeof meta === "object" ? meta.TransactionResult : "Unknown error";
+      if (err !== "tecKILLED" || attempt > 0) {
+        throw new Error(formatTransactionError(err));
+      }
+    }
+
+    const burnTx: xrpl.Payment = {
+      TransactionType: "Payment",
+      Account: wallet.address,
+      Destination: ISSUER_ADDRESS,
+      Amount: {
+        currency: TOKEN_CURRENCY,
+        value: quantity,
+        issuer: ISSUER_ADDRESS,
+      },
+    };
+    const preparedBurn = await client.autofill(burnTx);
+    const signedBurn = wallet.sign(preparedBurn);
+    const burnResult = await client.submitAndWait(signedBurn.tx_blob);
+    const burnMeta = burnResult.result.meta as xrpl.TransactionMetadata;
+    if (
+      typeof burnMeta !== "object" ||
+      burnMeta.TransactionResult !== "tesSUCCESS"
+    ) {
+      const burnErr =
+        typeof burnMeta === "object"
+          ? burnMeta.TransactionResult
+          : "Unknown error";
+      throw new Error(`Failed to burn tokens after purchase: ${burnErr}`);
+    }
+
+    const { data: apiKeyTx } = await supabase
+      .from("api_key_transactions")
+      .select("api_key")
+      .limit(1)
+      .single();
+    const realApiKey = apiKeyTx?.api_key || "no_real_key_available";
+    const proxyKey = generateProxyKey();
+    await supabase.from("proxy_api_keys").insert({
+      proxy_key: proxyKey,
+      real_key: realApiKey,
+      user_id: user.id,
+      token_type: TOKEN_CURRENCY,
+      ...(walletId && { wallet_id: walletId }),
+    });
+
+    const { data: existingTokens, error: selectError } = await supabase
+      .from("user_api_tokens")
+      .select("id, token_amount")
+      .eq("user_id", user.id)
+      .eq("token_name", TOKEN_CURRENCY)
+      .maybeSingle();
+    if (selectError)
+      console.error("Error checking existing tokens:", selectError);
+    if (existingTokens) {
+      const newAmount = existingTokens.token_amount + qty;
+      await supabase
+        .from("user_api_tokens")
+        .update({
+          token_amount: newAmount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingTokens.id);
+    } else {
+      await supabase.from("user_api_tokens").insert({
+        user_id: user.id,
+        token_name: TOKEN_CURRENCY,
+        token_amount: qty,
+      });
+    }
+
+    const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+    if (weightedAvgPrice !== null) {
+      await supabase.from("token_prices").insert({
+        token_name: TOKEN_CURRENCY,
+        price: weightedAvgPrice,
+        price_time: new Date().toISOString(),
+      });
+    }
+
+    return {
+      hash: result.result.hash,
+      proxyKey,
+      tokensReceived: qty,
+      xrpPaid: totalXrpCost,
+      burnHash: burnResult.result.hash,
+    };
+  } finally {
+    await client.disconnect();
+  }
 }
 
 export function BuyOrderDialog({
@@ -118,22 +423,52 @@ export function BuyOrderDialog({
     : setInternalOpen;
   const [quantity, setQuantity] = useState("");
   const [secret, setSecret] = useState("");
+  const [walletId, setWalletId] = useState("");
+  const [wallets, setWallets] = useState<{ id: string; name: string }[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingOffers, setIsFetchingOffers] = useState(false);
   const [step, setStep] = useState<"form" | "success">("form");
   const [bestOffer, setBestOffer] = useState<SellOffer | null>(null);
+  const [allOffers, setAllOffers] = useState<SellOffer[]>([]);
   const [txResult, setTxResult] = useState<{
     hash: string;
     proxyKey: string;
     tokensReceived: number;
     xrpPaid: number;
+    burnHash: string;
   } | null>(null);
+  const [evmRecording, setEvmRecording] = useState(false);
+  const [evmRecordResult, setEvmRecordResult] = useState<RecordBurnOnEVMResult | null>(null);
 
-  // Fetch best offer when dialog opens
+  // Fetch best offer and wallets when dialog opens
   useEffect(() => {
     if (open) {
       fetchOffers();
+      const loadWallets = async () => {
+        const supabase = getSupabase();
+        if (!supabase) return;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user?.id) return;
+        const { data: rows } = await supabase
+          .from("wallets")
+          .select("wallet_id, name")
+          .eq("user_id", user.id)
+          .order("created_at");
+        const list = (rows ?? []).map((r) => ({
+          id: r.wallet_id ?? "",
+          name: (r.name?.trim() || r.wallet_id) ?? "Unnamed",
+        }));
+        setWallets(list);
+        setWalletId((prev) =>
+          list.length > 0 && (prev === "" || !list.some((w) => w.id === prev))
+            ? list[0].id
+            : prev,
+        );
+      };
+      loadWallets();
     }
   }, [open]);
 
@@ -143,6 +478,7 @@ export function BuyOrderDialog({
     try {
       await client.connect();
       const offers = await fetchBestSellOffers(client);
+      setAllOffers(offers);
       if (offers.length > 0) {
         setBestOffer(offers[0]);
       } else {
@@ -159,10 +495,26 @@ export function BuyOrderDialog({
   const resetForm = () => {
     setQuantity("");
     setSecret("");
+    setWalletId("");
     setErrors({});
     setStep("form");
     setTxResult(null);
+    setEvmRecordResult(null);
     setBestOffer(null);
+    setAllOffers([]);
+  };
+
+  const handleRecordBurnOnEVM = async () => {
+    if (!txResult?.burnHash) return;
+    setEvmRecording(true);
+    setEvmRecordResult(null);
+    const result = await recordBurnOnEVM(
+      txResult.burnHash,
+      tokenAmountToWei(txResult.tokensReceived),
+      TOKEN_CURRENCY,
+    );
+    setEvmRecordResult(result);
+    setEvmRecording(false);
   };
 
   const validateForm = (): boolean => {
@@ -173,14 +525,21 @@ export function BuyOrderDialog({
       newErrors.quantity = "Please enter a valid quantity greater than 0";
     }
 
+    if (!walletId?.trim()) {
+      newErrors.wallet = "Please select a wallet";
+    }
+
     if (!secret || secret.trim().length < 20) {
       newErrors.secret = "Please enter a valid wallet secret";
     }
 
-    if (!bestOffer) {
+    if (allOffers.length === 0) {
       newErrors.general = "No sell offers available";
-    } else if (qty > bestOffer.quantity) {
-      newErrors.quantity = `Maximum available: ${bestOffer.quantity} tokens`;
+    } else {
+      const { filledQty } = computeFillAcrossOffers(allOffers, qty);
+      if (filledQty < qty) {
+        newErrors.quantity = `Not enough liquidity. Available: ${filledQty.toLocaleString()} tokens (fills across multiple offers).`;
+      }
     }
 
     setErrors(newErrors);
@@ -188,257 +547,36 @@ export function BuyOrderDialog({
   };
 
   const handleSubmit = async () => {
-    if (!validateForm() || !bestOffer) return;
-
+    if (!validateForm() || allOffers.length === 0) return;
     setIsLoading(true);
     setErrors({});
-
-    const client = new xrpl.Client(XRPL_SERVER);
-
     try {
-      const supabase = getSupabase();
-      if (!supabase) {
-        throw new Error("Supabase client not available");
-      }
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        throw new Error("User not authenticated");
-      }
-
-      // Create wallet from secret
-      let wallet: xrpl.Wallet;
-      try {
-        wallet = xrpl.Wallet.fromSeed(secret.trim());
-      } catch {
-        setErrors({ secret: "Invalid wallet secret" });
-        setIsLoading(false);
-        return;
-      }
-
-      await client.connect();
-
-      const qty = parseFloat(quantity);
-      const totalXrpCost = qty * bestOffer.pricePerUnit;
-      const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
-
-      // Step 1: Set up trust line for the token (required to receive tokens)
-      const trustSetTx: xrpl.TrustSet = {
-        TransactionType: "TrustSet",
-        Account: wallet.address,
-        LimitAmount: {
-          currency: TOKEN_CURRENCY,
-          issuer: ISSUER_ADDRESS,
-          value: "1000000000", // High limit to allow receiving tokens
-        },
-      };
-
-      const preparedTrust = await client.autofill(trustSetTx);
-      const signedTrust = wallet.sign(preparedTrust);
-      const trustResult = await client.submitAndWait(signedTrust.tx_blob);
-      const trustMeta = trustResult.result.meta as xrpl.TransactionMetadata;
-
-      // Trust line setup is idempotent - tecDUPLICATE is OK if already exists
-      if (
-        typeof trustMeta === "object" &&
-        trustMeta.TransactionResult !== "tesSUCCESS" &&
-        trustMeta.TransactionResult !== "tecDUPLICATE"
-      ) {
-        throw new Error(
-          `Failed to set up trust line: ${trustMeta.TransactionResult}`,
-        );
-      }
-
-      // Step 2: Create an OfferCreate to buy tokens
-      // Buyer offers XRP (TakerGets) and wants GGK tokens (TakerPays)
-      // Use tfImmediateOrCancel to ensure the offer fills immediately
-      const offerCreateTx: xrpl.OfferCreate = {
-        TransactionType: "OfferCreate",
-        Account: wallet.address,
-        TakerGets: totalDrops, // XRP in drops that buyer is offering
-        TakerPays: {
-          currency: TOKEN_CURRENCY,
-          value: quantity,
-          issuer: ISSUER_ADDRESS,
-        }, // GGK tokens that buyer wants
-        Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
-      };
-
-      // Prepare and sign the transaction
-      const prepared = await client.autofill(offerCreateTx);
-      const signed = wallet.sign(prepared);
-      const result = await client.submitAndWait(signed.tx_blob);
-
-      const meta = result.result.meta as xrpl.TransactionMetadata;
-      console.log("[DEBUG] OfferCreate result:", result.result);
-      console.log("[DEBUG] OfferCreate meta:", meta);
-
-      if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS") {
-        // Transaction successful - now burn tokens, set up proxy key, and update token balance
-        console.log(
-          "[DEBUG] OfferCreate succeeded, attempting to burn tokens...",
-        );
-
-        // Check wallet balance before burn
-        const balancesBefore = await client.request({
-          command: "account_lines",
-          account: wallet.address,
-        });
-        console.log(
-          "[DEBUG] Token balances before burn:",
-          balancesBefore.result.lines,
-        );
-
-        // 1. Immediately burn the received tokens by sending them back to the issuer
-        const burnTx: xrpl.Payment = {
-          TransactionType: "Payment",
-          Account: wallet.address,
-          Destination: ISSUER_ADDRESS,
-          Amount: {
-            currency: TOKEN_CURRENCY,
-            value: quantity,
-            issuer: ISSUER_ADDRESS,
-          },
-        };
-
-        console.log("[DEBUG] Burn transaction:", burnTx);
-        const preparedBurn = await client.autofill(burnTx);
-        const signedBurn = wallet.sign(preparedBurn);
-        const burnResult = await client.submitAndWait(signedBurn.tx_blob);
-        const burnMeta = burnResult.result.meta as xrpl.TransactionMetadata;
-        console.log("[DEBUG] Burn result:", burnResult.result);
-
-        if (
-          typeof burnMeta !== "object" ||
-          burnMeta.TransactionResult !== "tesSUCCESS"
-        ) {
-          console.error("Failed to burn tokens:", burnMeta);
-          throw new Error(
-            `Failed to burn tokens after purchase: ${typeof burnMeta === "object" ? burnMeta.TransactionResult : "Unknown error"}`,
-          );
-        }
-
-        console.log("[DEBUG] Tokens burned successfully");
-
-        // 2. Find the real API key from api_key_transactions for this token
-        const { data: apiKeyTx } = await supabase
-          .from("api_key_transactions")
-          .select("api_key")
-          .limit(1)
-          .single();
-
-        const realApiKey = apiKeyTx?.api_key || "no_real_key_available";
-
-        // 3. Generate a proxy key
-        const proxyKey = generateProxyKey();
-
-        // 4. Store the proxy key mapping
-        const { error: proxyInsertError } = await supabase
-          .from("proxy_api_keys")
-          .insert({
-            proxy_key: proxyKey,
-            real_key: realApiKey,
-          });
-
-        if (proxyInsertError) {
-          console.error("Error storing proxy key:", proxyInsertError);
-        }
-
-        // 5. Upsert user's token balance
-        const { data: existingTokens, error: selectError } = await supabase
-          .from("user_api_tokens")
-          .select("id, token_amount")
-          .eq("user_id", user.id)
-          .eq("token_name", TOKEN_CURRENCY)
-          .maybeSingle();
-
-        if (selectError) {
-          console.error("Error checking existing tokens:", selectError);
-        }
-
-        if (existingTokens) {
-          // Update existing record
-          const newAmount = existingTokens.token_amount + qty;
-          const { error: updateError } = await supabase
-            .from("user_api_tokens")
-            .update({
-              token_amount: newAmount,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existingTokens.id);
-
-          if (updateError) {
-            console.error("Error updating user tokens:", updateError);
-          } else {
-            console.log("Updated user tokens:", { userId: user.id, newAmount });
-          }
-        } else {
-          // Insert new record
-          const { error: insertError } = await supabase
-            .from("user_api_tokens")
-            .insert({
-              user_id: user.id,
-              token_name: TOKEN_CURRENCY,
-              token_amount: qty,
-            });
-
-          if (insertError) {
-            console.error("Error inserting user tokens:", insertError);
-          } else {
-            console.log("Inserted user tokens:", {
-              userId: user.id,
-              tokenAmount: qty,
-            });
-          }
-        }
-
-        // Calculate and store the weighted average price
-        const weightedAvgPrice = await calculateWeightedAveragePrice(client);
-        if (weightedAvgPrice !== null) {
-          const { error: priceInsertError } = await supabase
-            .from("token_prices")
-            .insert({
-              token_name: TOKEN_CURRENCY,
-              price: weightedAvgPrice,
-              price_time: new Date().toISOString(),
-            });
-
-          if (priceInsertError) {
-            console.error("Error storing token price:", priceInsertError);
-          }
-        }
-
-        setTxResult({
-          hash: result.result.hash,
-          proxyKey,
-          tokensReceived: qty,
-          xrpPaid: totalXrpCost,
-        });
-        setStep("success");
-      } else {
-        const errorResult =
-          typeof meta === "object" ? meta.TransactionResult : "Unknown error";
-        throw new Error(`Transaction failed: ${errorResult}`);
-      }
+      const result = await executeBuyOrder(
+        quantity,
+        secret,
+        walletId?.trim() || undefined,
+      );
+      setTxResult(result);
+      setStep("success");
     } catch (error: unknown) {
       console.error("Error buying tokens:", error);
       const errorMessage =
         error instanceof Error ? error.message : "Failed to buy tokens";
       setErrors({ general: errorMessage });
     } finally {
-      await client.disconnect();
       setIsLoading(false);
     }
   };
 
   const estimatedCost = () => {
-    if (!bestOffer) return "N/A";
     const qty = parseFloat(quantity) || 0;
-    return (qty * bestOffer.pricePerUnit).toFixed(6);
+    if (!qty || allOffers.length === 0) return "N/A";
+    const { totalXrpCost, filledQty } = computeFillAcrossOffers(allOffers, qty);
+    if (filledQty < qty) return "N/A";
+    return totalXrpCost.toFixed(6);
   };
+
+  const totalAvailable = allOffers.reduce((s, o) => s + o.quantity, 0);
 
   return (
     <Dialog
@@ -477,24 +615,46 @@ export function BuyOrderDialog({
                 </div>
               )}
 
-              {/* Best offer info */}
+              {/* Order book info — fills across multiple offers on XRPL */}
               <div className="rounded-md bg-muted p-3">
-                <p className="text-sm font-medium">Best Available Offer</p>
+                <p className="text-sm font-medium">Order Book (XRPL)</p>
                 {isFetchingOffers ? (
                   <p className="text-sm text-muted-foreground">Loading...</p>
                 ) : bestOffer ? (
                   <>
                     <p className="text-sm text-muted-foreground">
-                      Price: {bestOffer.pricePerUnit.toFixed(8)} XRP per token
+                      Best price: {bestOffer.pricePerUnit.toFixed(8)} XRP per token
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Available: {bestOffer.quantity.toLocaleString()} tokens
+                      Available: {totalAvailable.toLocaleString()} tokens (order fills across multiple offers)
                     </p>
                   </>
                 ) : (
                   <p className="text-sm text-destructive">
                     No sell offers available
                   </p>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Wallet</Label>
+                <Select
+                  value={walletId || undefined}
+                  onValueChange={setWalletId}
+                >
+                  <SelectTrigger id="buyWallet" aria-invalid={!!errors.wallet}>
+                    <SelectValue placeholder="Select wallet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {wallets.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.wallet && (
+                  <p className="text-sm text-destructive">{errors.wallet}</p>
                 )}
               </div>
 
@@ -507,7 +667,7 @@ export function BuyOrderDialog({
                   type="number"
                   step="any"
                   min="0"
-                  max={bestOffer?.quantity || undefined}
+                  max={totalAvailable || undefined}
                   placeholder="e.g., 100"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
@@ -557,7 +717,7 @@ export function BuyOrderDialog({
               </Button>
               <Button
                 onClick={handleSubmit}
-                disabled={isLoading || !bestOffer}
+                disabled={isLoading || allOffers.length === 0 || !walletId?.trim()}
                 className="bg-green-600 hover:bg-green-700"
               >
                 {isLoading ? "Processing..." : "Buy Tokens"}
@@ -606,6 +766,30 @@ export function BuyOrderDialog({
                 <code className="block overflow-auto rounded bg-muted p-2 text-xs">
                   {txResult.hash}
                 </code>
+              </div>
+
+              {/* Optional: record burn on XRPL EVM for on-chain transparency */}
+              <div className="grid gap-2 rounded-md border border-muted p-3">
+                <p className="text-sm font-medium">Record burn on-chain (XRPL EVM)</p>
+                <p className="text-xs text-muted-foreground">
+                  Record this burn on the XRPL EVM sidechain for transparency. Requires MetaMask on XRPL EVM (you pay gas).
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={evmRecording || !process.env.NEXT_PUBLIC_BURN_REGISTRY_ADDRESS}
+                  onClick={handleRecordBurnOnEVM}
+                >
+                  {evmRecording ? "Recording…" : "Record burn on XRPL EVM"}
+                </Button>
+                {evmRecordResult && (
+                  <p className={`text-xs ${evmRecordResult.success ? "text-green-600" : "text-destructive"}`}>
+                    {evmRecordResult.success
+                      ? `Recorded. Tx: ${evmRecordResult.txHash.slice(0, 10)}…`
+                      : evmRecordResult.error}
+                  </p>
+                )}
               </div>
             </div>
 

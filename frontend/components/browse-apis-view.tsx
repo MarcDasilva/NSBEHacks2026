@@ -26,7 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { getApiKeyForWallet, submitSellOrder } from "@/components/sell-order-dialog";
-import { BuyOrderDialog } from "@/components/buy-order-dialog";
+import { executeBuyOrder } from "@/components/buy-order-dialog";
 import { motion } from "motion/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
@@ -270,7 +270,7 @@ export function BrowseApisView() {
   const [sellError, setSellError] = useState("");
   const [sellSuccess, setSellSuccess] = useState("");
   const [sellLoading, setSellLoading] = useState(false);
-  const [buyDialogOpen, setBuyDialogOpen] = useState(false);
+  const [buyLoading, setBuyLoading] = useState(false);
 
   const QUOTE_OPTIONS = [
     { value: "XRP", label: "XRP" },
@@ -887,14 +887,12 @@ export function BrowseApisView() {
                   />
                   <button
                     type="button"
-                    disabled={sellOrBuy === "sell" ? sellLoading : false}
+                    disabled={
+                      sellOrBuy === "sell"
+                        ? sellLoading
+                        : buyLoading
+                    }
                     onClick={async () => {
-                      if (sellOrBuy === "buy") {
-                        setBuyDialogOpen(true);
-                        return;
-                      }
-                      setSellError("");
-                      setSellSuccess("");
                       const supabase = getSupabase();
                       if (!supabase) {
                         toast.error("Not signed in.", { position: "bottom-right" });
@@ -915,6 +913,37 @@ export function BrowseApisView() {
                         toast.error("Enter a valid quantity.", { position: "bottom-right" });
                         return;
                       }
+
+                      if (sellOrBuy === "buy") {
+                        const { data: walletRow } = await supabase
+                          .from("wallets")
+                          .select("wallet_secret")
+                          .eq("user_id", user.id)
+                          .eq("wallet_id", sellWalletId)
+                          .maybeSingle();
+                        const secret = walletRow?.wallet_secret?.trim();
+                        if (!secret) {
+                          toast.error("Add and save your wallet secret in Billing for this wallet.", { position: "bottom-right" });
+                          return;
+                        }
+                        setBuyLoading(true);
+                        try {
+                          const result = await executeBuyOrder(sellTokenCount, secret, sellWalletId);
+                          toast.success(
+                            `Purchased ${result.tokensReceived} tokens. View your proxy key in Order Book.`,
+                            { position: "bottom-right" },
+                          );
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : "Buy failed.";
+                          toast.error(msg, { position: "bottom-right" });
+                        } finally {
+                          setBuyLoading(false);
+                        }
+                        return;
+                      }
+
+                      setSellError("");
+                      setSellSuccess("");
                       if (!sellPrice || isNaN(price) || price <= 0) {
                         toast.error("Enter a valid price.", { position: "bottom-right" });
                         return;
@@ -961,14 +990,12 @@ export function BrowseApisView() {
                     className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 capitalize disabled:opacity-50"
                     style={{ fontFamily: "var(--font-geist-sans)" }}
                   >
-                    {sellOrBuy === "sell" ? (sellLoading ? "Selling…" : "Sell") : "Buy"}
+                    {sellOrBuy === "sell"
+                      ? (sellLoading ? "Selling…" : "Sell")
+                      : (buyLoading ? "Buying…" : "Buy")}
                   </button>
                 </div>
               </div>
-              <BuyOrderDialog
-                open={buyDialogOpen}
-                onOpenChange={setBuyDialogOpen}
-              />
               {/* News — single row, headlines as links */}
               <div className="mt-6 pl-0 pr-6">
                 <a

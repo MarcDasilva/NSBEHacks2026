@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { IconCopy, IconEye, IconEyeOff } from "@tabler/icons-react";
 import { getSupabase } from "@/lib/supabase/client";
 import { API_PROVIDERS } from "@/components/connection-nodes";
 import {
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { toast } from "sonner";
 
 interface WalletRow {
   id: string;
@@ -24,6 +26,53 @@ interface SellRequestRow {
   quantity: number;
   price_per_unit: number;
   created_at: string;
+}
+
+interface ProxyKeyRow {
+  proxy_key: string;
+  real_key: string;
+  token_type: string;
+  wallet_id: string | null;
+  created_at: string | null;
+}
+
+function maskKey(key: string): string {
+  if (key.length <= 10) return "••••••••";
+  return key.slice(0, 4) + "••••••••••••••••••••••••••••" + key.slice(-4);
+}
+
+function ProxyKeyCell({ row }: { row: ProxyKeyRow }) {
+  const [visible, setVisible] = useState(false);
+  const display = visible ? row.proxy_key : maskKey(row.proxy_key);
+
+  const copy = useCallback(() => {
+    navigator.clipboard.writeText(row.proxy_key);
+    toast.success("Proxy key copied to clipboard", { position: "bottom-right" });
+  }, [row.proxy_key]);
+
+  return (
+    <div className="flex items-center gap-2 rounded border border-[#404040] bg-[#1a1a1a] px-3 py-2 font-mono text-sm">
+      <span className="min-w-0 flex-1 truncate text-white" title={visible ? undefined : "Click eye to reveal"}>
+        {display}
+      </span>
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="shrink-0 rounded p-1.5 text-[#888] hover:bg-[#333] hover:text-white"
+        aria-label={visible ? "Hide key" : "Show key"}
+      >
+        {visible ? <IconEyeOff className="size-4" /> : <IconEye className="size-4" />}
+      </button>
+      <button
+        type="button"
+        onClick={copy}
+        className="shrink-0 rounded p-1.5 text-[#888] hover:bg-[#333] hover:text-white"
+        aria-label="Copy to clipboard"
+      >
+        <IconCopy className="size-4" />
+      </button>
+    </div>
+  );
 }
 
 function formatPrice(price: number) {
@@ -51,6 +100,7 @@ const SORT_OPTIONS = [
 export function OrderBookView() {
   const [wallets, setWallets] = useState<WalletRow[]>([]);
   const [sellRequests, setSellRequests] = useState<SellRequestRow[]>([]);
+  const [proxyKeys, setProxyKeys] = useState<ProxyKeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [sort, setSort] = useState<string>("name_az");
@@ -65,12 +115,14 @@ export function OrderBookView() {
     if (!authUser?.id) {
       setWallets([]);
       setSellRequests([]);
+      setProxyKeys([]);
       setLoading(false);
       return;
     }
-    const [walletsRes, sellRes] = await Promise.all([
+    const [walletsRes, sellRes, proxyRes] = await Promise.all([
       supabase.from("wallets").select("wallet_id, name").eq("user_id", authUser.id).order("created_at"),
       supabase.from("sell_requests").select("wallet_id, provider_id, transaction_id, quantity, price_per_unit, created_at").eq("user_id", authUser.id).order("created_at", { ascending: false }),
+      supabase.from("proxy_api_keys").select("proxy_key, real_key, token_type, wallet_id, created_at").eq("user_id", authUser.id).order("created_at", { ascending: false }),
     ]);
     if (walletsRes.data) {
       setWallets(
@@ -84,6 +136,22 @@ export function OrderBookView() {
       setSellRequests(
         sellRes.data as SellRequestRow[],
       );
+    }
+    if (proxyRes.error) {
+      console.warn("Order book: could not load proxy_api_keys", proxyRes.error);
+    }
+    if (proxyRes.data) {
+      setProxyKeys(
+        (proxyRes.data as ProxyKeyRow[]).map((r) => ({
+          proxy_key: r.proxy_key ?? "",
+          real_key: r.real_key ?? "",
+          token_type: r.token_type ?? "",
+          wallet_id: r.wallet_id ?? null,
+          created_at: r.created_at ?? null,
+        })),
+      );
+    } else {
+      setProxyKeys([]);
     }
     setLoading(false);
   }, []);
@@ -103,6 +171,20 @@ export function OrderBookView() {
         {} as Record<string, SellRequestRow[]>,
       ),
     [sellRequests],
+  );
+
+  const proxyKeysByWallet = useMemo(
+    () =>
+      proxyKeys.reduce(
+        (acc, r) => {
+          const wid = (r.wallet_id ?? "").trim() || "__unassigned__";
+          if (!acc[wid]) acc[wid] = [];
+          acc[wid].push(r);
+          return acc;
+        },
+        {} as Record<string, ProxyKeyRow[]>,
+      ),
+    [proxyKeys],
   );
 
   const filteredAndSortedWallets = useMemo(() => {
@@ -200,8 +282,30 @@ export function OrderBookView() {
             Loading…
           </div>
         ) : wallets.length === 0 ? (
-          <div className="flex min-h-[200px] flex-1 items-center justify-center rounded-lg border border-[#404040] bg-[#252525]/50 p-8 text-center text-sm text-[#888]">
-            No wallets. Add a wallet in Billing or Connections to see sell requests here.
+          <div className="flex flex-1 flex-col gap-5">
+            {proxyKeys.length > 0 && (
+              <div className="rounded-lg border border-[#404040] bg-[#252525] p-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#888]">Buy orders</p>
+                <div className="max-h-[280px] space-y-3 overflow-auto">
+                  {proxyKeys.map((row) => (
+                    <div key={row.proxy_key} className="rounded border border-[#404040]/50 bg-[#1a1a1a] p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        {row.token_type ? (
+                          <span className="rounded bg-[#333] px-2 py-0.5 text-xs font-medium text-white">{row.token_type}</span>
+                        ) : null}
+                        <span className="text-xs text-[#888]">
+                          {row.created_at ? new Date(row.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                        </span>
+                      </div>
+                      <ProxyKeyCell row={row} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex min-h-[200px] flex-1 items-center justify-center rounded-lg border border-[#404040] bg-[#252525]/50 p-8 text-center text-sm text-[#888]">
+              No wallets. Add a wallet in Billing or Connections to see sell requests here.
+            </div>
           </div>
         ) : filteredAndSortedWallets.length === 0 ? (
           <div className="flex min-h-[200px] flex-1 items-center justify-center rounded-lg border border-[#404040] bg-[#252525]/50 p-8 text-center text-sm text-[#888]">
@@ -247,12 +351,48 @@ export function OrderBookView() {
                       <span className="text-sm text-[#888]">—</span>
                     )}
                   </div>
-                  {/* Buy orders */}
+                  {/* Buy orders — proxy keys from buy orders for this wallet (incl. unassigned on first card) */}
                   <div className="flex min-h-0 flex-col px-4 py-3">
                     <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[#888]">
                       Buy orders
                     </p>
-                    <p className="text-sm text-[#888]">No buy orders for this wallet.</p>
+                    {(() => {
+                      const forWallet = proxyKeysByWallet[wallet.id] ?? [];
+                      const unassigned = proxyKeysByWallet["__unassigned__"] ?? [];
+                      const isFirstWallet = filteredAndSortedWallets[0]?.id === wallet.id;
+                      const list = isFirstWallet ? [...unassigned, ...forWallet] : forWallet;
+                      if (list.length === 0) {
+                        return <p className="text-sm text-[#888]">No buy orders for this wallet.</p>;
+                      }
+                      return (
+                      <div className="max-h-[220px] space-y-3 overflow-auto">
+                        {list.map((row) => (
+                          <div
+                            key={row.proxy_key}
+                            className="rounded border border-[#404040]/50 bg-[#1a1a1a] p-2"
+                          >
+                            <div className="mb-1.5 flex items-center justify-between gap-2">
+                              {row.token_type ? (
+                                <span className="rounded bg-[#333] px-2 py-0.5 text-xs font-medium text-white">
+                                  {row.token_type}
+                                </span>
+                              ) : null}
+                              <span className="text-xs text-[#888]">
+                                {row.created_at
+                                  ? new Date(row.created_at).toLocaleDateString(undefined, {
+                                      month: "short",
+                                      day: "numeric",
+                                      year: "numeric",
+                                    })
+                                  : "—"}
+                              </span>
+                            </div>
+                            <ProxyKeyCell row={row} />
+                          </div>
+                        ))}
+                      </div>
+                      );
+                    })()}
                   </div>
                   {/* Line separating Buy and Sell orders */}
                   <hr className="w-full border-0 border-t border-[#404040]" role="separator" aria-hidden />

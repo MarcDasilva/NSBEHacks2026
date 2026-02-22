@@ -20,9 +20,10 @@ import {
   connectionNodeTypes,
   NODE_BANK_ITEMS,
 } from "@/components/connection-nodes";
+import { BuyOrderDialog } from "@/components/buy-order-dialog";
 import { SellOrderDialog } from "@/components/sell-order-dialog";
 import { getSupabase } from "@/lib/supabase/client";
-import { IconDeviceFloppy, IconShoppingCart } from "@tabler/icons-react";
+import { IconDeviceFloppy, IconShoppingBag, IconShoppingCart } from "@tabler/icons-react";
 
 const DARK_GRID_COLOR = "#404040";
 const DARK_BG_COLOR = "#1a1a1a";
@@ -79,6 +80,7 @@ function ConnectionsCanvas() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loadStatus, setLoadStatus] = useState<"idle" | "loading" | "done" | "error">("loading");
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
+  const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
 
   useEffect(() => {
@@ -224,6 +226,18 @@ function ConnectionsCanvas() {
         >
           <IconShoppingCart className="size-4 shrink-0" />
           Sell
+        </button>
+        <BuyOrderDialog
+          open={buyDialogOpen}
+          onOpenChange={setBuyDialogOpen}
+        />
+        <button
+          type="button"
+          onClick={() => setBuyDialogOpen(true)}
+          className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-md border border-[#404040] bg-[#252525] px-3 py-2.5 text-sm font-medium text-white shadow transition-colors hover:border-[#555] hover:bg-[#2a2a2a]"
+        >
+          <IconShoppingBag className="size-4 shrink-0" />
+          Buy
         </button>
       </div>
       {/* Canvas */}

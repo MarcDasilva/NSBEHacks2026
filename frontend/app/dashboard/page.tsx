@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { getSupabase } from "@/lib/supabase/client";
@@ -11,6 +11,7 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { BrowseApisView } from "@/components/browse-apis-view";
 import { DashboardFlowView } from "@/components/dashboard-flow-view";
+import { OrderBookView } from "@/components/orderbook-view";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
@@ -24,6 +25,7 @@ type UserInfo = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { phase, setPhase } = usePostLoginPhase();
   const [firstname, setFirstname] = useState<string>("");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -121,7 +123,16 @@ export default function DashboardPage() {
 
   const showWelcome = phase === "welcome" || phase === "fading";
   const showDashboard = phase === "done" && userInfo;
-  const [mainView, setMainView] = useState<"browse" | "dashboard">("browse");
+  const initialView = (searchParams.get("view") === "orderbook" ? "orderbook" : searchParams.get("view") === "dashboard" ? "dashboard" : "browse") as "browse" | "dashboard" | "orderbook";
+  const [mainView, setMainView] = useState<"browse" | "dashboard" | "orderbook">(initialView);
+
+  // Keep mainView in sync with ?view= when URL changes (e.g. redirect from /orderbook)
+  useEffect(() => {
+    const view = searchParams.get("view");
+    if (view === "orderbook") setMainView("orderbook");
+    else if (view === "dashboard") setMainView("dashboard");
+    else if (view === "browse") setMainView("browse");
+  }, [searchParams]);
 
   // Fade up dashboard when it mounts (phase === "done"), same style as landing page
   useEffect(() => {
@@ -222,10 +233,20 @@ export default function DashboardPage() {
             />
             <SidebarInset className="bg-transparent min-h-0 flex flex-1 flex-col overflow-hidden">
               <SiteHeader
-                title={mainView === "browse" ? "Browse APIs" : "Connections"}
+                title={
+                  mainView === "browse"
+                    ? "Browse APIs"
+                    : mainView === "orderbook"
+                      ? "Order Book"
+                      : "Connections"
+                }
               />
               {mainView === "browse" ? (
                 <BrowseApisView />
+              ) : mainView === "orderbook" ? (
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <OrderBookView />
+                </div>
               ) : (
                 <div className="flex min-h-0 min-w-0 flex-1">
                   <DashboardFlowView />

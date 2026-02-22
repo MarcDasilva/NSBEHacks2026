@@ -164,14 +164,14 @@ async function isApiKeyConnectedToWallet(
 }
 
 /**
- * Returns the API key (or proxy key) from the first API Provider / Proxy Key node connected to
- * the given wallet_id in the user's saved connection graph. Used for inline sell (no dialog).
+ * Returns the API key (or proxy key) and providerId from the first API Provider / Proxy Key node
+ * connected to the given wallet_id in the user's saved connection graph.
  */
 export async function getApiKeyForWallet(
     supabase: SupabaseClient,
     userId: string,
     walletId: string
-): Promise<string | null> {
+): Promise<{ apiKey: string; providerId: string } | null> {
     if (!walletId?.trim()) return null;
 
     const { data: graphRow, error: graphError } = await supabase
@@ -206,7 +206,8 @@ export async function getApiKeyForWallet(
         if (typ !== "apiProvider" && typ !== "proxyKey") continue;
         const data = n.data as Record<string, unknown> | undefined;
         const key = (data?.apiKey ?? data?.proxyKey) as string | undefined;
-        if (typeof key === "string" && key.trim()) return key.trim();
+        const providerId = (data?.providerId as string) ?? "";
+        if (typeof key === "string" && key.trim()) return { apiKey: key.trim(), providerId: providerId || "unknown" };
     }
     return null;
 }
@@ -215,9 +216,17 @@ export async function getApiKeyForWallet(
 export async function submitSellOrder(
     supabase: SupabaseClient,
     userId: string,
-    params: { apiKey: string; quantity: string; pricePerUnit: string; secret: string }
+    params: {
+        apiKey: string;
+        quantity: string;
+        pricePerUnit: string;
+        secret: string;
+        skipConnectionCheck?: boolean;
+        wallet_id?: string;
+        provider_id?: string;
+    }
 ): Promise<{ hash: string; transactionId: string }> {
-    const { apiKey, quantity, pricePerUnit, secret } = params;
+    const { apiKey, quantity, pricePerUnit, secret, skipConnectionCheck, wallet_id: walletId, provider_id: providerId } = params;
     const qty = parseFloat(quantity);
     const price = parseFloat(pricePerUnit);
     if (isNaN(qty) || qty <= 0 || isNaN(price) || price <= 0) {
@@ -232,9 +241,11 @@ export async function submitSellOrder(
         throw new Error("Invalid wallet secret");
     }
 
-    const allowed = await isApiKeyConnectedToWallet(supabase, userId, wallet.address, apiKey.trim());
-    if (!allowed) {
-        throw new Error("You must have an API provider connected to that wallet to sell.");
+    if (!skipConnectionCheck) {
+        const allowed = await isApiKeyConnectedToWallet(supabase, userId, wallet.address, apiKey.trim());
+        if (!allowed) {
+            throw new Error("You must have an API provider connected to that wallet to sell.");
+        }
     }
 
     const client = new xrpl.Client("wss://s.altnet.rippletest.net:51233");
@@ -306,14 +317,43 @@ export async function submitSellOrder(
             if (insertError) {
                 throw new Error("Transaction succeeded but failed to store API key record");
             }
-            const weightedAvgPrice = await calculateWeightedAveragePrice(client);
-            if (weightedAvgPrice !== null) {
-                await supabase.from("token_prices").insert({
-                    token_name: TOKEN_CURRENCY,
-                    price: weightedAvgPrice,
-                    price_time: new Date().toISOString(),
+            let wId = walletId;
+            let pId = providerId;
+            if (!wId || !pId) {
+                const { data: walletRows } = await supabase.from("wallets").select("wallet_id, wallet_secret").eq("user_id", userId);
+                for (const row of walletRows ?? []) {
+                    try {
+                        if (xrpl.Wallet.fromSeed(row.wallet_secret ?? "").address === wallet.address) {
+                            wId = row.wallet_id ?? "";
+                            break;
+                        }
+                    } catch { continue; }
+                }
+                if (wId) {
+                    const keyInfo = await getApiKeyForWallet(supabase, userId, wId);
+                    if (keyInfo) pId = keyInfo.providerId;
+                }
+            }
+            if (wId && pId) {
+                await supabase.from("sell_requests").insert({
+                    user_id: userId,
+                    wallet_id: wId,
+                    provider_id: pId,
+                    transaction_id: transactionId,
+                    quantity: qty,
+                    price_per_unit: price,
                 });
             }
+            // Update token price in background so we can return immediately
+            void calculateWeightedAveragePrice(client).then((weightedAvgPrice) => {
+                if (weightedAvgPrice !== null) {
+                    supabase.from("token_prices").insert({
+                        token_name: TOKEN_CURRENCY,
+                        price: weightedAvgPrice,
+                        price_time: new Date().toISOString(),
+                    }).then(() => {}, () => {});
+                }
+            });
             return { hash: result.result.hash, transactionId };
         }
         const err = typeof meta === "object" ? meta.TransactionResult : "Unknown error";

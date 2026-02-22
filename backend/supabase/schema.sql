@@ -308,6 +308,36 @@ ALTER TABLE ticker_news ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "ticker_news_select_all" ON ticker_news;
 CREATE POLICY "ticker_news_select_all" ON ticker_news FOR SELECT USING (true);
 
+-- api_key_transactions: links API key to XRPL transaction (used when selling)
+CREATE TABLE IF NOT EXISTS api_key_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  api_key TEXT NOT NULL,
+  transaction_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- sell_requests: each sell order linked to user + wallet + provider for display on connection graph
+CREATE TABLE IF NOT EXISTS sell_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  wallet_id TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  transaction_id TEXT NOT NULL,
+  quantity NUMERIC NOT NULL,
+  price_per_unit NUMERIC NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sell_requests_user ON sell_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_sell_requests_wallet_provider ON sell_requests(wallet_id, provider_id);
+
+ALTER TABLE sell_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sell_requests_select_own" ON sell_requests;
+DROP POLICY IF EXISTS "sell_requests_insert_own" ON sell_requests;
+CREATE POLICY "sell_requests_select_own" ON sell_requests FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "sell_requests_insert_own" ON sell_requests FOR INSERT WITH CHECK (auth.uid() = user_id);
+
 -- user_connection_graphs: saved connection flow (nodes, edges, positions) for later reference.
 CREATE TABLE IF NOT EXISTS user_connection_graphs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

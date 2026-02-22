@@ -930,8 +930,8 @@ export function BrowseApisView() {
                         toast.error("Add and save your wallet secret in Billing for this wallet.", { position: "bottom-right" });
                         return;
                       }
-                      const apiKey = await getApiKeyForWallet(supabase, user.id, sellWalletId);
-                      if (!apiKey) {
+                      const keyInfo = await getApiKeyForWallet(supabase, user.id, sellWalletId);
+                      if (!keyInfo) {
                         toast.error("Connect an API provider to this wallet in Connections.", { position: "bottom-right" });
                         return;
                       }
@@ -940,10 +940,13 @@ export function BrowseApisView() {
                       setSellSuccess("");
                       try {
                         await submitSellOrder(supabase, user.id, {
-                          apiKey,
+                          apiKey: keyInfo.apiKey,
                           quantity: sellTokenCount,
                           pricePerUnit: sellPrice,
                           secret,
+                          skipConnectionCheck: true,
+                          wallet_id: sellWalletId,
+                          provider_id: keyInfo.providerId,
                         });
                         setSellSuccess("Sell order created.");
                         toast.success("Sell order created.", { position: "bottom-right" });

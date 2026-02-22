@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { IconMail, IconServer, type Icon } from "@tabler/icons-react"
 
 import { Button } from '@/components/ui/button'
@@ -57,29 +58,38 @@ export function NavMain({
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton
-                tooltip={item.title}
-                asChild={!!onNavItemClick}
-              >
-                {onNavItemClick ? (
-                  <button
-                    type="button"
-                    onClick={() => onNavItemClick(item.title)}
-                  >
-                    {item.icon && <item.icon />}
-                    <span>{item.title}</span>
-                  </button>
-                ) : (
-                  <>
-                    {item.icon && <item.icon />}
-                    <span>{item.title}</span>
-                  </>
-                )}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          {items.map((item) => {
+            const useLink = !!item.url && item.url !== "#"
+            const useClick = !useLink && onNavItemClick
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  asChild={useLink || useClick}
+                >
+                  {useLink ? (
+                    <Link href={item.url}>
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </Link>
+                  ) : useClick ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavItemClick(item.title)}
+                    >
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </button>
+                  ) : (
+                    <>
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

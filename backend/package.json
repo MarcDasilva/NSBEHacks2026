@@ -7,6 +7,7 @@
     "dev": "npx ts-node src/server.ts",
     "mint": "npx ts-node src/mint.ts",
     "buy": "npx ts-node src/buy.ts",
+    "seed-prices": "npx ts-node src/seed-token-prices.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

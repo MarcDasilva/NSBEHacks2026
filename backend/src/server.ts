@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import xrplRoutes from "./routes/xrpl";
 import listingsRoutes from "./routes/listings";
+import usersRoutes from "./routes/users";
 import { getXRPLService } from "./services/xrpl";
 
 dotenv.config();
@@ -17,6 +18,7 @@ app.use(express.json());
 // Routes
 app.use("/api/xrpl", xrplRoutes);
 app.use("/api/listings", listingsRoutes);
+app.use("/api/users", usersRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
@@ -54,6 +56,9 @@ async function start() {
       console.log(`   POST   /api/listings/purchase         — Record purchase`);
       console.log(`   GET    /api/listings/purchases/:wallet — Buyer's purchases`);
       console.log(`   POST   /api/listings/access           — Get API key (verify NFT first)`);
+      console.log(`\n👤 Users API endpoints:`);
+      console.log(`   GET    /api/users/wallet               — Get user's wallet address`);
+      console.log(`   POST   /api/users/wallet               — Store/update wallet address`);
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error);

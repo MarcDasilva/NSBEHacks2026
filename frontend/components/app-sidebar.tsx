@@ -43,6 +43,11 @@ const data = {
       icon: IconPlugConnected,
     },
     {
+      title: "Order Book",
+      url: "/orderbook",
+      icon: IconChartCandle,
+    },
+    {
       title: "Lifecycle",
       url: "#",
       icon: IconListDetails,

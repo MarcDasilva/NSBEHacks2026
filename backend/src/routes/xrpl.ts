@@ -12,9 +12,15 @@
  */
 
 import { Router, Request, Response } from "express";
+import * as xrpl from "xrpl";
 import { getXRPLService } from "../services/xrpl";
 
 const router = Router();
+
+// Token configuration from environment
+const TOKEN_CURRENCY = process.env.TOKEN_CURRENCY || "GGK";
+const ISSUER_ADDRESS = process.env.ISSUER_ADDRESS || "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
+const ISSUER_SECRET = process.env.ISSUER_SECRET || "sEd7uaitboDrh9pkCwBT2TECr3r5ftC";
 
 // ── Create Testnet Wallet ─────────────────────────────
 
@@ -42,10 +48,10 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
     const address = req.params.address as string;
     const service = getXRPLService();
 
-    const [balance, nfts] = await Promise.all([
-      service.getBalance(address),
-      service.getAccountNFTs(address),
-    ]);
+    const balancePromise = service.getBalance(address);
+    const nftsPromise = service.getAccountNFTs(address);
+    const balance = await balancePromise;
+    const nfts = await nftsPromise;
 
     res.json({ address, balance, nfts, nftCount: nfts.length });
   } catch (error: any) {
@@ -55,6 +61,102 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
     }
     console.error("Error fetching wallet:", error.message);
     res.status(500).json({ error: "Failed to fetch wallet info" });
+  }
+});
+
+// ── Issue Tokens to Address ────────────────────────────
+// This endpoint issues GGK tokens from the issuer to a recipient
+// Used when a seller wants to list tokens for sale
+
+router.post("/issue-tokens", async (req: Request, res: Response) => {
+  try {
+    const { recipientAddress, amount } = req.body;
+
+    if (!recipientAddress || !amount) {
+      res.status(400).json({
+        error: "Missing required fields: recipientAddress, amount",
+      });
+      return;
+    }
+
+    if (!ISSUER_SECRET) {
+      res.status(500).json({
+        error: "Issuer secret not configured",
+      });
+      return;
+    }
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      res.status(400).json({
+        error: "Amount must be a positive number",
+      });
+      return;
+    }
+
+    const service = getXRPLService();
+    await service.connect();
+
+    // Create issuer wallet from secret
+    const issuerWallet = xrpl.Wallet.fromSeed(ISSUER_SECRET);
+
+    // First, check if recipient has a trust line set up for this token
+    // If not, they need to set one up first
+    const client = new xrpl.Client(process.env.XRPL_NETWORK || "wss://s.altnet.rippletest.net:51233");
+    await client.connect();
+
+    try {
+      // Create the Payment transaction to send tokens
+      const paymentTx: xrpl.Payment = {
+        TransactionType: "Payment",
+        Account: issuerWallet.address,
+        Destination: recipientAddress,
+        Amount: {
+          currency: TOKEN_CURRENCY,
+          value: parsedAmount.toString(),
+          issuer: ISSUER_ADDRESS,
+        },
+      };
+
+      // Prepare and sign the transaction
+      const prepared = await client.autofill(paymentTx);
+      const signed = issuerWallet.sign(prepared);
+      const result = await client.submitAndWait(signed.tx_blob);
+
+      const meta = result.result.meta as xrpl.TransactionMetadata;
+
+      if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS") {
+        res.status(200).json({
+          success: true,
+          txHash: result.result.hash,
+          amount: parsedAmount,
+          currency: TOKEN_CURRENCY,
+          recipient: recipientAddress,
+        });
+      } else {
+        const errorResult =
+          typeof meta === "object" ? meta.TransactionResult : "Unknown error";
+
+        // Check for common errors
+        if (errorResult === "tecPATH_DRY") {
+          res.status(400).json({
+            error: "Recipient needs to set up a trust line for this token first",
+            code: errorResult,
+          });
+          return;
+        }
+
+        res.status(400).json({
+          error: `Transaction failed: ${errorResult}`,
+          code: errorResult,
+        });
+      }
+    } finally {
+      await client.disconnect();
+    }
+  } catch (error: any) {
+    console.error("Error issuing tokens:", error.message);
+    res.status(500).json({ error: error.message || "Failed to issue tokens" });
   }
 });
 

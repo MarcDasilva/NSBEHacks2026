@@ -10,6 +10,13 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { getSupabase } from "@/lib/supabase/client";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type TickerRow = {
   id: string;
@@ -49,6 +56,16 @@ export function BrowseApisView() {
   const [loaded, setLoaded] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState<TickerRow | null>(null);
   const [graphPanelVisible, setGraphPanelVisible] = useState(false);
+  const [quoteAsset, setQuoteAsset] = useState<string>("XRP");
+
+  const QUOTE_OPTIONS = [
+    { value: "XRP", label: "XRP" },
+    { value: "USDT", label: "USDT" },
+    { value: "USDC", label: "USDC" },
+    { value: "DAI", label: "DAI" },
+    { value: "BUSD", label: "BUSD" },
+    { value: "TUSD", label: "TUSD" },
+  ];
 
   useEffect(() => {
     if (!selectedTicker) {
@@ -159,27 +176,62 @@ export function BrowseApisView() {
               graphPanelVisible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
             }`}
           >
-            <div className="flex items-center justify-between border-b border-sidebar-border px-6 py-3">
-              <div className="flex items-center gap-3">
-                {selectedTicker.logo ? (
-                  <img
-                    src={selectedTicker.logo}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded-full object-contain bg-sidebar-accent"
-                  />
-                ) : (
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-medium text-primary">
-                    {selectedTicker.icon ?? selectedTicker.symbol.slice(0, 1)}
-                  </span>
-                )}
-                <span className="text-lg font-semibold text-sidebar-foreground" style={{ fontFamily: "var(--font-geist-sans)" }}>
-                  {selectedTicker.symbol}
-                </span>
+            {/* Header: large logo + title beside, dropdown under title, close button */}
+            <div className="flex items-start justify-between border-b border-sidebar-border px-6 pt-5 pb-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-5">
+                  {selectedTicker.logo ? (
+                    <img
+                      src={selectedTicker.logo}
+                      alt=""
+                      className="h-24 w-24 shrink-0 rounded-full object-contain bg-sidebar-accent"
+                    />
+                  ) : (
+                    <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-primary/20 text-2xl font-medium text-primary">
+                      {selectedTicker.icon ?? selectedTicker.symbol.slice(0, 1)}
+                    </span>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    <span
+                      className="text-xl font-bold tracking-tight text-white"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    >
+                      {selectedTicker.symbol}
+                    </span>
+                    {/* Dropdown: quote asset (default XRP, stable coins) — underneath the title */}
+                    <Select value={quoteAsset} onValueChange={setQuoteAsset}>
+                      <SelectTrigger className="h-9 w-[140px] border-sidebar-border bg-sidebar-accent/50 text-sidebar-foreground">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {QUOTE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {/* Current price — underneath the dropdown */}
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-2xl font-semibold tabular-nums text-white" style={{ fontFamily: "var(--font-geist-sans)" }}>
+                        {formatNum(selectedTicker.last)}
+                      </span>
+                      <span className="text-sm text-sidebar-foreground/70">{quoteAsset}</span>
+                      <span
+                        className={`text-sm font-medium tabular-nums ${
+                          selectedTicker.chg >= 0 ? "text-green-500" : "text-red-500"
+                        }`}
+                      >
+                        {formatChg(selectedTicker.chg)} {formatPct(selectedTicker.chgPct)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedTicker(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
               >
                 <IconX className="size-5" />
               </button>

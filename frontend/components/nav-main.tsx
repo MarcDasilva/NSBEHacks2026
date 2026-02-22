@@ -65,7 +65,7 @@ export function NavMain({
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   tooltip={item.title}
-                  asChild={useLink || useClick}
+                  asChild={!!(useLink || useClick)}
                 >
                   {useLink ? (
                     <Link href={item.url}>

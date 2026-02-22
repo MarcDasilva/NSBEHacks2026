@@ -71,9 +71,10 @@ export async function recordBurnOnEVM(
       : XRPL_EVM_TESTNET_CHAIN_ID);
 
   try {
-    const { createWalletClient, custom, writeContract } = await import("viem");
+    const { createWalletClient, custom } = await import("viem");
 
-    const transport = custom((window as unknown as { ethereum: unknown }).ethereum);
+    const ethereum = (window as unknown as { ethereum: unknown }).ethereum;
+    const transport = custom(ethereum as Parameters<typeof custom>[0]);
     const client = createWalletClient({
       transport,
     });

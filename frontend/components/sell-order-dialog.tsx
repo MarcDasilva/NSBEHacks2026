@@ -17,11 +17,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  getTokenConfig,
+  XRPL_SERVER,
+  type TokenConfig,
+} from "@/lib/token-config";
 
-// Hardcoded token configuration
-const TOKEN_CURRENCY = "GGK";
-const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
-const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
@@ -31,19 +32,17 @@ const BACKEND_URL =
  */
 async function calculateWeightedAveragePrice(
   client: xrpl.Client,
+  tokenConfig: TokenConfig,
 ): Promise<number | null> {
   try {
-    // Query the order book for GGK/XRP sell offers
-    // TakerGets: XRP (what sellers want)
-    // TakerPays: GGK (what sellers are offering)
     const response = await client.request({
       command: "book_offers",
       taker_gets: { currency: "XRP" },
       taker_pays: {
-        currency: TOKEN_CURRENCY,
-        issuer: ISSUER_ADDRESS,
+        currency: tokenConfig.currency,
+        issuer: tokenConfig.issuer,
       },
-      limit: 100, // Get up to 100 offers
+      limit: 100,
     });
 
     const offers = response.result.offers;
@@ -90,11 +89,13 @@ async function calculateWeightedAveragePrice(
  * Fetches weighted average price using its own connection. Use this for background
  * updates so the main sell flow can disconnect its client immediately.
  */
-async function fetchWeightedAveragePriceInBackground(): Promise<number | null> {
+async function fetchWeightedAveragePriceInBackground(
+  tokenConfig: TokenConfig,
+): Promise<number | null> {
   const client = new xrpl.Client(XRPL_SERVER);
   try {
     await client.connect();
-    return await calculateWeightedAveragePrice(client);
+    return await calculateWeightedAveragePrice(client, tokenConfig);
   } catch (error) {
     console.error("Error in background weighted average fetch:", error);
     return null;
@@ -256,6 +257,8 @@ export async function submitSellOrder(
     skipConnectionCheck?: boolean;
     wallet_id?: string;
     provider_id?: string;
+    /** Token to sell (from graph/API context). Defaults to GGK when omitted. */
+    tokenConfig?: TokenConfig;
   },
 ): Promise<{ hash: string; transactionId: string }> {
   const {
@@ -266,7 +269,9 @@ export async function submitSellOrder(
     skipConnectionCheck,
     wallet_id: walletId,
     provider_id: providerId,
+    tokenConfig: tokenConfigParam,
   } = params;
+  const cfg = tokenConfigParam ?? getTokenConfig(null);
   const qty = parseFloat(quantity);
   const price = parseFloat(pricePerUnit);
   if (isNaN(qty) || qty <= 0 || isNaN(price) || price <= 0) {
@@ -303,8 +308,8 @@ export async function submitSellOrder(
       TransactionType: "TrustSet",
       Account: wallet.address,
       LimitAmount: {
-        currency: TOKEN_CURRENCY,
-        issuer: ISSUER_ADDRESS,
+        currency: cfg.currency,
+        issuer: cfg.issuer,
         value: "1000000000",
       },
     };
@@ -327,7 +332,12 @@ export async function submitSellOrder(
       issueResponse = await fetch(`${BACKEND_URL}/api/xrpl/issue-tokens`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipientAddress: wallet.address, amount: qty }),
+        body: JSON.stringify({
+          recipientAddress: wallet.address,
+          amount: qty,
+          currency: cfg.currency,
+          issuerAddress: cfg.issuer,
+        }),
       });
     } catch (fetchErr) {
       const msg =
@@ -352,9 +362,9 @@ export async function submitSellOrder(
       Account: wallet.address,
       TakerPays: totalDrops,
       TakerGets: {
-        currency: TOKEN_CURRENCY,
+        currency: cfg.currency,
         value: quantity,
-        issuer: ISSUER_ADDRESS,
+        issuer: cfg.issuer,
       },
       Flags: 0,
     };
@@ -410,12 +420,12 @@ export async function submitSellOrder(
         });
       }
       // Update token price in background with its own connection (main client is disconnected in finally)
-      void fetchWeightedAveragePriceInBackground().then((weightedAvgPrice) => {
+      void fetchWeightedAveragePriceInBackground(cfg).then((weightedAvgPrice) => {
         if (weightedAvgPrice !== null) {
           supabase
             .from("token_prices")
             .insert({
-              token_name: TOKEN_CURRENCY,
+              token_name: cfg.currency,
               price: weightedAvgPrice,
               price_time: new Date().toISOString(),
             })
@@ -440,6 +450,8 @@ interface SellOrderDialogProps {
   /** When provided, dialog is controlled by parent (no trigger shown). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Token to sell (from graph/API context). Defaults to GGK when omitted. */
+  tokenConfig?: TokenConfig;
 }
 
 interface FormErrors {
@@ -454,7 +466,9 @@ export function SellOrderDialog({
   trigger,
   open: controlledOpen,
   onOpenChange,
+  tokenConfig: tokenConfigProp,
 }: SellOrderDialogProps) {
+  const effectiveTokenConfig = tokenConfigProp ?? getTokenConfig(null);
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled =
     controlledOpen !== undefined && onOpenChange !== undefined;
@@ -533,6 +547,7 @@ export function SellOrderDialog({
         quantity,
         pricePerUnit,
         secret: secret.trim(),
+        tokenConfig: effectiveTokenConfig,
       });
       setTxResult({ hash: result.hash, transactionId: result.transactionId });
       setStep("success");
@@ -571,7 +586,7 @@ export function SellOrderDialog({
             <DialogHeader>
               <DialogTitle>Create Sell Order</DialogTitle>
               <DialogDescription>
-                Sell your {TOKEN_CURRENCY} tokens on the XRP Ledger DEX.
+                Sell your {effectiveTokenConfig.currency} tokens on the XRP Ledger DEX.
               </DialogDescription>
             </DialogHeader>
 
@@ -602,7 +617,7 @@ export function SellOrderDialog({
 
               <div className="grid gap-2">
                 <Label htmlFor="quantity">
-                  Quantity ({TOKEN_CURRENCY} tokens)
+                  Quantity ({effectiveTokenConfig.currency} tokens)
                 </Label>
                 <Input
                   id="quantity"
@@ -618,7 +633,7 @@ export function SellOrderDialog({
                   <p className="text-sm text-destructive">{errors.quantity}</p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  How many {TOKEN_CURRENCY} tokens you want to sell
+                  How many {effectiveTokenConfig.currency} tokens you want to sell
                 </p>
               </div>
 
@@ -640,7 +655,7 @@ export function SellOrderDialog({
                   </p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  Price in XRP for each {TOKEN_CURRENCY} token
+                  Price in XRP for each {effectiveTokenConfig.currency} token
                 </p>
               </div>
 
@@ -648,7 +663,7 @@ export function SellOrderDialog({
                 <div className="rounded-md bg-muted p-3">
                   <p className="text-sm font-medium">Order Summary</p>
                   <p className="text-sm text-muted-foreground">
-                    Selling {quantity} {TOKEN_CURRENCY} for {totalXrp()} XRP
+                    Selling {quantity} {effectiveTokenConfig.currency} for {totalXrp()} XRP
                     total
                   </p>
                 </div>
@@ -706,11 +721,11 @@ export function SellOrderDialog({
                   Transaction Successful
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  You received {quantity} {TOKEN_CURRENCY} tokens and created a
+                  You received {quantity} {effectiveTokenConfig.currency} tokens and created a
                   sell order
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Selling {quantity} {TOKEN_CURRENCY} at {pricePerUnit} XRP each
+                  Selling {quantity} {effectiveTokenConfig.currency} at {pricePerUnit} XRP each
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Total: {totalXrp()} XRP

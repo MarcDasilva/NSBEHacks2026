@@ -27,11 +27,11 @@ import {
   tokenAmountToWei,
   type RecordBurnOnEVMResult,
 } from "@/lib/evm-burn-registry";
-
-// Hardcoded token configuration
-const TOKEN_CURRENCY = "GGK";
-const ISSUER_ADDRESS = "rUpuaJVFUFhw9Dy7X7SwJgw19PpG7BJ1kE";
-const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
+import {
+  getTokenConfig,
+  XRPL_SERVER,
+  type TokenConfig,
+} from "@/lib/token-config";
 
 /** Map XRPL transaction result codes to user-friendly messages. */
 function formatTransactionError(code: string): string {
@@ -41,7 +41,7 @@ function formatTransactionError(code: string): string {
     case "tecPATH_DRY":
       return "No liquidity path for this trade. The order book may be empty or the price moved.";
     case "tecUNFUNDED_OFFER":
-      return "Insufficient XRP balance to place this order.";
+      return "Insufficient XRP balance to place this order. You need enough XRP to cover the order plus the ledger reserve (~10–12 XRP).";
     case "tecUNFUNDED":
     case "tecINSUFFICIENT_FUNDS":
       return "Insufficient XRP balance (including reserve).";
@@ -57,6 +57,8 @@ interface BuyOrderDialogProps {
   /** When provided, dialog is controlled by parent (no trigger shown). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Token to buy (from graph/API context). Defaults to GGK when omitted. */
+  tokenConfig?: TokenConfig;
 }
 
 interface FormErrors {
@@ -96,8 +98,6 @@ async function fetchBestSellOffers(
   client: xrpl.Client,
   tokenConfig: TokenConfig,
 ): Promise<SellOffer[]> {
-  console.log("[DEBUG] tokenConfig.currency:", tokenConfig.currency);
-  console.log("[DEBUG] tokenConfig.issuer:", tokenConfig.issuer);
   // Query for sell offers: taker gets tokens and pays XRP
   const response = await client.request({
     command: "book_offers",
@@ -110,7 +110,6 @@ async function fetchBestSellOffers(
   });
 
   const offers = response.result.offers || [];
-  console.log("[DEBUG] Raw offers from order book:", offers);
 
   return offers
     .map((offer) => {
@@ -168,14 +167,15 @@ function computeFillAcrossOffers(
  */
 async function calculateWeightedAveragePrice(
   client: xrpl.Client,
+  tokenConfig: TokenConfig,
 ): Promise<number | null> {
   try {
     const response = await client.request({
       command: "book_offers",
       taker_gets: { currency: "XRP" },
       taker_pays: {
-        currency: TOKEN_CURRENCY,
-        issuer: ISSUER_ADDRESS,
+        currency: tokenConfig.currency,
+        issuer: tokenConfig.issuer,
       },
       limit: 100,
     });
@@ -218,12 +218,15 @@ export type BuyOrderResult = {
  * Fetches best offer, sets trust line, creates offer, burns tokens, stores proxy key and balance.
  * Use this from the graph panel (no dialog) or from the dialog.
  * @param walletId Optional wallet_id to link the proxy key to (for Order Book per-wallet buy orders).
+ * @param tokenConfig Token to buy (from graph/API context). Defaults to GGK when omitted.
  */
 export async function executeBuyOrder(
   quantity: string,
   secret: string,
   walletId?: string,
+  tokenConfig?: TokenConfig,
 ): Promise<BuyOrderResult> {
+  const cfg = tokenConfig ?? getTokenConfig(null);
   const qty = parseFloat(quantity);
   if (!quantity || isNaN(qty) || qty <= 0) {
     throw new Error("Please enter a valid quantity greater than 0");
@@ -249,7 +252,7 @@ export async function executeBuyOrder(
   const client = new xrpl.Client(XRPL_SERVER);
   await client.connect();
   try {
-    const getOffers = async () => fetchBestSellOffers(client);
+    const getOffers = async () => fetchBestSellOffers(client, cfg);
 
     let offers = await getOffers();
     if (offers.length === 0) throw new Error("No sell offers available");
@@ -261,12 +264,24 @@ export async function executeBuyOrder(
       );
     }
 
+    // XRPL requires balance >= offer amount + base reserve (~10 XRP); owner reserve for the offer adds more
+    const BASE_RESERVE_XRP = 10;
+    const OWNER_RESERVE_XRP = 2;
+    const minXrpRequired = totalXrpCost + BASE_RESERVE_XRP + OWNER_RESERVE_XRP;
+    const balanceXrp = await client.getXrpBalance(wallet.address);
+    const balanceNum = Number(balanceXrp);
+    if (isNaN(balanceNum) || balanceNum < minXrpRequired) {
+      throw new Error(
+        `Insufficient XRP balance. This order needs ~${minXrpRequired.toFixed(1)} XRP (${totalXrpCost.toFixed(4)} for the order + reserve). Your balance: ${balanceNum.toFixed(2)} XRP.`,
+      );
+    }
+
     const trustSetTx: xrpl.TrustSet = {
       TransactionType: "TrustSet",
       Account: wallet.address,
       LimitAmount: {
-        currency: TOKEN_CURRENCY,
-        issuer: ISSUER_ADDRESS,
+        currency: cfg.currency,
+        issuer: cfg.issuer,
         value: "1000000000",
       },
     };
@@ -307,9 +322,9 @@ export async function executeBuyOrder(
         Account: wallet.address,
         TakerGets: totalDrops,
         TakerPays: {
-          currency: TOKEN_CURRENCY,
+          currency: cfg.currency,
           value: quantity,
-          issuer: ISSUER_ADDRESS,
+          issuer: cfg.issuer,
         },
         Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
       };
@@ -329,11 +344,11 @@ export async function executeBuyOrder(
     const burnTx: xrpl.Payment = {
       TransactionType: "Payment",
       Account: wallet.address,
-      Destination: ISSUER_ADDRESS,
+      Destination: cfg.issuer,
       Amount: {
-        currency: TOKEN_CURRENCY,
+        currency: cfg.currency,
         value: quantity,
-        issuer: ISSUER_ADDRESS,
+        issuer: cfg.issuer,
       },
     };
     const preparedBurn = await client.autofill(burnTx);
@@ -362,7 +377,7 @@ export async function executeBuyOrder(
       proxy_key: proxyKey,
       real_key: realApiKey,
       user_id: user.id,
-      token_type: TOKEN_CURRENCY,
+      token_type: cfg.currency,
       ...(walletId && { wallet_id: walletId }),
     });
 
@@ -370,7 +385,7 @@ export async function executeBuyOrder(
       .from("user_api_tokens")
       .select("id, token_amount")
       .eq("user_id", user.id)
-      .eq("token_name", TOKEN_CURRENCY)
+      .eq("token_name", cfg.currency)
       .maybeSingle();
     if (selectError)
       console.error("Error checking existing tokens:", selectError);
@@ -386,15 +401,15 @@ export async function executeBuyOrder(
     } else {
       await supabase.from("user_api_tokens").insert({
         user_id: user.id,
-        token_name: TOKEN_CURRENCY,
+        token_name: cfg.currency,
         token_amount: qty,
       });
     }
 
-    const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+    const weightedAvgPrice = await calculateWeightedAveragePrice(client, cfg);
     if (weightedAvgPrice !== null) {
       await supabase.from("token_prices").insert({
-        token_name: TOKEN_CURRENCY,
+        token_name: cfg.currency,
         price: weightedAvgPrice,
         price_time: new Date().toISOString(),
       });
@@ -416,7 +431,9 @@ export function BuyOrderDialog({
   trigger,
   open: controlledOpen,
   onOpenChange,
+  tokenConfig: tokenConfigProp,
 }: BuyOrderDialogProps) {
+  const effectiveTokenConfig = tokenConfigProp ?? getTokenConfig(null);
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled =
     controlledOpen !== undefined && onOpenChange !== undefined;
@@ -474,14 +491,14 @@ export function BuyOrderDialog({
       };
       loadWallets();
     }
-  }, [open]);
+  }, [open, effectiveTokenConfig.currency]);
 
   const fetchOffers = async () => {
     setIsFetchingOffers(true);
     const client = new xrpl.Client(XRPL_SERVER);
     try {
       await client.connect();
-      const offers = await fetchBestSellOffers(client);
+      const offers = await fetchBestSellOffers(client, effectiveTokenConfig);
       setAllOffers(offers);
       if (offers.length > 0) {
         setBestOffer(offers[0]);
@@ -515,7 +532,7 @@ export function BuyOrderDialog({
     const result = await recordBurnOnEVM(
       txResult.burnHash,
       tokenAmountToWei(txResult.tokensReceived),
-      TOKEN_CURRENCY,
+      effectiveTokenConfig.currency,
     );
     setEvmRecordResult(result);
     setEvmRecording(false);
@@ -559,6 +576,7 @@ export function BuyOrderDialog({
         quantity,
         secret,
         walletId?.trim() || undefined,
+        effectiveTokenConfig,
       );
       setTxResult(result);
       setStep("success");
@@ -606,7 +624,7 @@ export function BuyOrderDialog({
         {step === "form" && (
           <>
             <DialogHeader>
-              <DialogTitle>Buy {tokenConfig.currency} Tokens</DialogTitle>
+              <DialogTitle>Buy {effectiveTokenConfig.currency} Tokens</DialogTitle>
               <DialogDescription>
                 Purchase tokens from the XRP Ledger DEX and get a proxy API key.
               </DialogDescription>
@@ -666,7 +684,7 @@ export function BuyOrderDialog({
 
               <div className="grid gap-2">
                 <Label htmlFor="buyQuantity">
-                  Quantity ({tokenConfig.currency} tokens)
+                  Quantity ({effectiveTokenConfig.currency} tokens)
                 </Label>
                 <Input
                   id="buyQuantity"
@@ -689,7 +707,7 @@ export function BuyOrderDialog({
                 <div className="rounded-md bg-green-500/10 p-3">
                   <p className="text-sm font-medium">Order Summary</p>
                   <p className="text-sm text-muted-foreground">
-                    Buying {quantity} {tokenConfig.currency} for{" "}
+                    Buying {quantity} {effectiveTokenConfig.currency} for{" "}
                     {estimatedCost()} XRP
                   </p>
                 </div>
@@ -751,7 +769,7 @@ export function BuyOrderDialog({
                   Transaction Successful
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Purchased {txResult.tokensReceived} {tokenConfig.currency}{" "}
+                  Purchased {txResult.tokensReceived} {effectiveTokenConfig.currency}{" "}
                   tokens
                 </p>
                 <p className="text-sm text-muted-foreground">

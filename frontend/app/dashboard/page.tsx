@@ -1,7 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { getSupabase } from "@/lib/supabase/client";
 import {
@@ -9,11 +10,36 @@ import {
   FADE_DURATION,
 } from "@/contexts/PostLoginPhaseContext";
 import { AppSidebar } from "@/components/app-sidebar";
-import { BrowseApisView } from "@/components/browse-apis-view";
-import { DashboardFlowView } from "@/components/dashboard-flow-view";
-import { OrderBookView } from "@/components/orderbook-view";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+
+const BrowseApisView = dynamic(
+  () => import("@/components/browse-apis-view").then((m) => ({ default: m.BrowseApisView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const DashboardFlowView = dynamic(
+  () => import("@/components/dashboard-flow-view").then((m) => ({ default: m.DashboardFlowView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const OrderBookView = dynamic(
+  () => import("@/components/orderbook-view").then((m) => ({ default: m.OrderBookView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const UsageView = dynamic(
+  () => import("@/components/usage-view").then((m) => ({ default: m.UsageView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+function DashboardViewSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-[#1a1a1a] text-sm text-[#888]">
+      Loading…
+    </div>
+  );
+}
 
 const WELCOME_DURATION = 3.5;
 
@@ -23,7 +49,7 @@ type UserInfo = {
   avatar: string;
 };
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { phase, setPhase } = usePostLoginPhase();
@@ -123,13 +149,14 @@ export default function DashboardPage() {
 
   const showWelcome = phase === "welcome" || phase === "fading";
   const showDashboard = phase === "done" && userInfo;
-  const initialView = (searchParams.get("view") === "orderbook" ? "orderbook" : searchParams.get("view") === "dashboard" ? "dashboard" : "browse") as "browse" | "dashboard" | "orderbook";
-  const [mainView, setMainView] = useState<"browse" | "dashboard" | "orderbook">(initialView);
+  const initialView = (searchParams.get("view") === "orderbook" ? "orderbook" : searchParams.get("view") === "usage" ? "usage" : searchParams.get("view") === "dashboard" ? "dashboard" : "browse") as "browse" | "dashboard" | "orderbook" | "usage";
+  const [mainView, setMainView] = useState<"browse" | "dashboard" | "orderbook" | "usage">(initialView);
 
   // Keep mainView in sync with ?view= when URL changes (e.g. redirect from /orderbook)
   useEffect(() => {
     const view = searchParams.get("view");
     if (view === "orderbook") setMainView("orderbook");
+    else if (view === "usage") setMainView("usage");
     else if (view === "dashboard") setMainView("dashboard");
     else if (view === "browse") setMainView("browse");
   }, [searchParams]);
@@ -238,7 +265,9 @@ export default function DashboardPage() {
                     ? "Browse APIs"
                     : mainView === "orderbook"
                       ? "Order Book"
-                      : "Connections"
+                      : mainView === "usage"
+                        ? "Usage"
+                        : "Connections"
                 }
               />
               {mainView === "browse" ? (
@@ -246,6 +275,10 @@ export default function DashboardPage() {
               ) : mainView === "orderbook" ? (
                 <div className="flex min-h-0 min-w-0 flex-1">
                   <OrderBookView />
+                </div>
+              ) : mainView === "usage" ? (
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <UsageView />
                 </div>
               ) : (
                 <div className="flex min-h-0 min-w-0 flex-1">
@@ -257,5 +290,21 @@ export default function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+function DashboardPageFallback() {
+  return (
+    <div className="flex min-h-svh w-full items-center justify-center bg-[#0d0d0d] text-sm text-[#888]">
+      Loading…
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardPageFallback />}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }

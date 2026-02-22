@@ -10,6 +10,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { getSupabase } from "@/lib/supabase/client";
+import { getTokenConfig, TICKER_LEGEND } from "@/lib/token-config";
 import {
   Select,
   SelectContent,
@@ -224,23 +225,8 @@ function computeLastChgFromData(
   return { last, chg, chgPct };
 }
 
-/** Legend: ticker id → token_name for Supabase token_prices (historical chart data) */
-export const TICKER_LEGEND: Record<string, string> = {
-  "google": "GGK",      // Google AI
-  "openai": "OAK",      // OpenAI
-  "anthropic": "ATK",   // Anthropic
-  "twilio": "TWI",
-  "elevenlabs": "EVL",
-  "mistral": "MST",
-  "cohere": "COH",
-  "polygon": "PLG",
-  "deepl": "DPL",
-  "gradium": "GRD",
-  "alpha-vantage": "AVT",
-  "gecko": "GCK",
-  "google-maps": "GMP",
-  "clearbit": "CLR",
-};
+/** Re-export for consumers that need ticker id → token_name. */
+export { TICKER_LEGEND } from "@/lib/token-config";
 
 /** token_name -> ticker id for looking up live prices */
 const ID_BY_TOKEN: Record<string, string> = Object.fromEntries(
@@ -928,7 +914,12 @@ export function BrowseApisView() {
                         }
                         setBuyLoading(true);
                         try {
-                          const result = await executeBuyOrder(sellTokenCount, secret, sellWalletId);
+                          const result = await executeBuyOrder(
+                            sellTokenCount,
+                            secret,
+                            sellWalletId,
+                            getTokenConfig(selectedTicker?.id),
+                          );
                           toast.success(
                             `Purchased ${result.tokensReceived} tokens. View your proxy key in Order Book.`,
                             { position: "bottom-right" },
@@ -976,6 +967,7 @@ export function BrowseApisView() {
                           skipConnectionCheck: true,
                           wallet_id: sellWalletId,
                           provider_id: keyInfo.providerId,
+                          tokenConfig: getTokenConfig(selectedTicker?.id),
                         });
                         setSellSuccess("Sell order created.");
                         toast.success("Sell order created.", { position: "bottom-right" });

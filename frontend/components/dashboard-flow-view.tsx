@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -23,6 +23,7 @@ import {
 import { BuyOrderDialog } from "@/components/buy-order-dialog";
 import { SellOrderDialog } from "@/components/sell-order-dialog";
 import { getSupabase } from "@/lib/supabase/client";
+import { getTokenConfig, type TokenConfig } from "@/lib/token-config";
 import { IconDeviceFloppy, IconShoppingBag, IconShoppingCart } from "@tabler/icons-react";
 
 const DARK_GRID_COLOR = "#404040";
@@ -75,13 +76,23 @@ function parseSavedGraph(saved: { nodes?: unknown; edges?: unknown }): { nodes: 
 }
 
 function ConnectionsCanvas() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loadStatus, setLoadStatus] = useState<"idle" | "loading" | "done" | "error">("loading");
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
+
+  /** Token config for buy/sell: from selected API/Proxy node, or first such node in the graph. */
+  const tokenConfig: TokenConfig = useMemo(() => {
+    const selected = nodes.filter((n) => (n as Node & { selected?: boolean }).selected);
+    const apiNode =
+      selected.find((n) => n.type === "apiProvider" || n.type === "proxyKey") ??
+      nodes.find((n) => n.type === "apiProvider" || n.type === "proxyKey");
+    const providerId = (apiNode?.data as { providerId?: string } | undefined)?.providerId;
+    return getTokenConfig(providerId);
+  }, [nodes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,6 +229,7 @@ function ConnectionsCanvas() {
         <SellOrderDialog
           open={sellDialogOpen}
           onOpenChange={setSellDialogOpen}
+          tokenConfig={tokenConfig}
         />
         <button
           type="button"
@@ -230,6 +242,7 @@ function ConnectionsCanvas() {
         <BuyOrderDialog
           open={buyDialogOpen}
           onOpenChange={setBuyDialogOpen}
+          tokenConfig={tokenConfig}
         />
         <button
           type="button"

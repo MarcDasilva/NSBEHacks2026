@@ -70,7 +70,7 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
 
 router.post("/issue-tokens", async (req: Request, res: Response) => {
   try {
-    const { recipientAddress, amount } = req.body;
+    const { recipientAddress, amount, currency, issuerAddress } = req.body;
 
     if (!recipientAddress || !amount) {
       res.status(400).json({
@@ -94,20 +94,24 @@ router.post("/issue-tokens", async (req: Request, res: Response) => {
       return;
     }
 
+    // Use request currency/issuer so sell flow can issue the token being sold (e.g. OAK, ATK)
+    const tokenCurrency = typeof currency === "string" && currency.trim() ? currency.trim() : TOKEN_CURRENCY;
+    const tokenIssuer = typeof issuerAddress === "string" && issuerAddress.trim() ? issuerAddress.trim() : ISSUER_ADDRESS;
+
     const service = getXRPLService();
     const { txHash } = await service.issueTokensToAddress(
       ISSUER_SECRET,
       recipientAddress,
       parsedAmount,
-      TOKEN_CURRENCY,
-      ISSUER_ADDRESS
+      tokenCurrency,
+      tokenIssuer
     );
 
     res.status(200).json({
       success: true,
       txHash,
       amount: parsedAmount,
-      currency: TOKEN_CURRENCY,
+      currency: tokenCurrency,
       recipient: recipientAddress,
     });
   } catch (error: any) {

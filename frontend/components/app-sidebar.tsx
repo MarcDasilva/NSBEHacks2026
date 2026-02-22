@@ -49,7 +49,7 @@ const data = {
       icon: IconChartCandle,
     },
     {
-      title: "Lifecycle",
+      title: "Usage",
       url: "#",
       icon: IconListDetails,
     },
@@ -159,7 +159,7 @@ export function AppSidebar({
   user: NavUserData;
   onLogout?: () => void;
   onAccountSaved?: (updates: { name: string; avatar: string }) => void;
-  onNavigate?: (view: "browse" | "dashboard" | "orderbook") => void;
+  onNavigate?: (view: "browse" | "dashboard" | "orderbook" | "usage") => void;
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -201,6 +201,7 @@ export function AppSidebar({
               ? (title) => {
                   if (title === "Connections") onNavigate("dashboard");
                   if (title === "Order Book") onNavigate("orderbook");
+                  if (title === "Usage") onNavigate("usage");
                 }
               : undefined
           }

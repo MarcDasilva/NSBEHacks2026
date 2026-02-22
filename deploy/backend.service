@@ -1,0 +1,18 @@
+[Unit]
+Description=NSBEHacks Backend (Express + XRPL + Supabase)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=APP_ROOT/backend
+Environment=NODE_ENV=production
+EnvironmentFile=APP_ROOT/backend/.env
+ExecStart=/usr/bin/npx ts-node src/server.ts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

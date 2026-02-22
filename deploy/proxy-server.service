@@ -1,0 +1,18 @@
+[Unit]
+Description=NSBEHacks Proxy Server (Elysia + Postgres + XRPL)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=APP_ROOT/proxy-server
+Environment=NODE_ENV=production
+EnvironmentFile=APP_ROOT/proxy-server/.env
+ExecStart=BUN_PATH run start
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

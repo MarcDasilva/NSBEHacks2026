@@ -24,7 +24,34 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
+import { motion } from "motion/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+
+/** Wraps content in motion.span; when key (e.g. value) changes, animates in. */
+function AnimatedValue({
+  valueKey,
+  className,
+  style,
+  children,
+}: {
+  valueKey: string | number;
+  className?: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.span
+      key={valueKey}
+      initial={{ opacity: 0, y: 2 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={className}
+      style={style}
+    >
+      {children}
+    </motion.span>
+  );
+}
 
 type TickerRow = {
   id: string;
@@ -160,16 +187,28 @@ function computeLastChgFromData(
   if (data.length === 0) return null;
   const lastPoint = data[data.length - 1];
   const last = lastPoint.price;
-  const dayAgoMs = lastPoint.timeMs - 24 * 60 * 60 * 1000;
-  let dayAgoPrice = last;
+  const d = new Date(lastPoint.timeMs);
+  const todayStartUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const yesterdayStartUtc = todayStartUtc - 24 * 60 * 60 * 1000;
+  const yesterdayEndUtc = todayStartUtc - 1;
+  let lastPriceYesterday = last;
   for (let i = data.length - 1; i >= 0; i--) {
-    if (data[i].timeMs <= dayAgoMs) {
-      dayAgoPrice = data[i].price;
+    const t = data[i].timeMs;
+    if (t >= yesterdayStartUtc && t <= yesterdayEndUtc) {
+      lastPriceYesterday = data[i].price;
       break;
     }
   }
-  const chg = last - dayAgoPrice;
-  const chgPct = dayAgoPrice !== 0 ? (chg / dayAgoPrice) * 100 : 0;
+  if (lastPriceYesterday === last) {
+    for (let i = data.length - 1; i >= 0; i--) {
+      if (data[i].timeMs < todayStartUtc) {
+        lastPriceYesterday = data[i].price;
+        break;
+      }
+    }
+  }
+  const chg = last - lastPriceYesterday;
+  const chgPct = lastPriceYesterday !== 0 ? (chg / lastPriceYesterday) * 100 : 0;
   return { last, chg, chgPct };
 }
 
@@ -207,7 +246,7 @@ export function BrowseApisView() {
   const [quoteAsset, setQuoteAsset] = useState<string>("XRP");
   const [chartData, setChartData] = useState<{ time: string; timeMs: number; price: number }[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
-  const [chartRange, setChartRange] = useState<"10m" | "1H" | "1D" | "1W" | "1M" | "1Y">("1M");
+  const [chartRange, setChartRange] = useState<"10m" | "1H" | "1D" | "1W" | "1M" | "1Y">("1H");
   const [sellPrice, setSellPrice] = useState("");
   const [sellTokenCount, setSellTokenCount] = useState("");
   const [sellWalletId, setSellWalletId] = useState<string>("");
@@ -477,15 +516,21 @@ export function BrowseApisView() {
     if (Math.abs(n) >= 0.01) return n.toFixed(4);
     return n.toFixed(6);
   };
-  const formatChg = (n: number) =>
-    (n >= 0 ? "+" : "") +
-    (n >= 1000
-      ? n.toLocaleString("en-US", {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 2,
-        })
-      : n.toFixed(2));
-  const formatPct = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+  const formatChg = (n: number) => {
+    const sign = n >= 0 ? "+" : "";
+    if (n >= 1000)
+      return sign + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    if (Math.abs(n) >= 1) return sign + n.toFixed(3);
+    if (Math.abs(n) >= 0.01) return sign + n.toFixed(4);
+    return sign + n.toFixed(6);
+  };
+  const formatPct = (n: number) => {
+    const sign = n >= 0 ? "+" : "";
+    const a = Math.abs(n);
+    if (a >= 1) return sign + n.toFixed(2) + "%";
+    if (a >= 0.01) return sign + n.toFixed(3) + "%";
+    return sign + n.toFixed(4) + "%";
+  };
 
   const chartRangeMs = useMemo(() => {
     const min = 60 * 1000;
@@ -588,16 +633,18 @@ export function BrowseApisView() {
                     </Select>
                     {/* Current price — underneath the dropdown; use real data when available */}
                     <div className="flex flex-wrap items-baseline gap-2">
-                      <span
+                      <AnimatedValue
+                        valueKey={panelPrice?.last ?? selectedTicker.last}
                         className="text-2xl font-semibold tabular-nums text-white"
                         style={{ fontFamily: "var(--font-geist-sans)" }}
                       >
                         {formatChartPrice(panelPrice?.last ?? selectedTicker.last)}
-                      </span>
+                      </AnimatedValue>
                       <span className="text-sm text-sidebar-foreground/70">
                         {quoteAsset}
                       </span>
-                      <span
+                      <AnimatedValue
+                        valueKey={`${panelPrice?.chg ?? selectedTicker.chg}-${panelPrice?.chgPct ?? selectedTicker.chgPct}`}
                         className={`text-sm font-medium tabular-nums ${
                           (panelPrice?.chg ?? selectedTicker.chg) >= 0
                             ? "text-green-500"
@@ -606,7 +653,7 @@ export function BrowseApisView() {
                       >
                         {formatChg(panelPrice?.chg ?? selectedTicker.chg)}{" "}
                         {formatPct(panelPrice?.chgPct ?? selectedTicker.chgPct)}
-                      </span>
+                      </AnimatedValue>
                     </div>
                   </div>
                 </div>
@@ -884,21 +931,27 @@ export function BrowseApisView() {
                           </div>
                         </td>
                         <td className="py-3 pr-6 text-right tabular-nums text-sidebar-foreground">
-                          {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
+                          <AnimatedValue valueKey={livePrices[row.id]?.last ?? row.last}>
+                            {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
+                          </AnimatedValue>
                         </td>
                         <td
                           className={`py-3 pr-6 text-right tabular-nums ${
                             (livePrices[row.id]?.chg ?? row.chg) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {formatChg(livePrices[row.id]?.chg ?? row.chg)}
+                          <AnimatedValue valueKey={livePrices[row.id]?.chg ?? row.chg}>
+                            {formatChg(livePrices[row.id]?.chg ?? row.chg)}
+                          </AnimatedValue>
                         </td>
                         <td
                           className={`py-3 pr-6 text-right tabular-nums ${
                             (livePrices[row.id]?.chgPct ?? row.chgPct) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
+                          <AnimatedValue valueKey={livePrices[row.id]?.chgPct ?? row.chgPct}>
+                            {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
+                          </AnimatedValue>
                         </td>
                         <td className="w-8 py-3 pr-4">
                           {isHovered ? (
@@ -1014,21 +1067,27 @@ export function BrowseApisView() {
                         </div>
                       </td>
                       <td className="py-3 pr-6 text-right tabular-nums text-sidebar-foreground">
-                        {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
+                        <AnimatedValue valueKey={livePrices[row.id]?.last ?? row.last}>
+                          {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
+                        </AnimatedValue>
                       </td>
                       <td
                         className={`py-3 pr-6 text-right tabular-nums ${
                           (livePrices[row.id]?.chg ?? row.chg) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatChg(livePrices[row.id]?.chg ?? row.chg)}
+                        <AnimatedValue valueKey={livePrices[row.id]?.chg ?? row.chg}>
+                          {formatChg(livePrices[row.id]?.chg ?? row.chg)}
+                        </AnimatedValue>
                       </td>
                       <td
                         className={`py-3 pr-6 text-right tabular-nums ${
                           (livePrices[row.id]?.chgPct ?? row.chgPct) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
+                        <AnimatedValue valueKey={livePrices[row.id]?.chgPct ?? row.chgPct}>
+                          {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
+                        </AnimatedValue>
                       </td>
                       <td className="w-8 py-3 pr-4">
                         {isHovered ? (

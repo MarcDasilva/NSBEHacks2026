@@ -289,3 +289,21 @@ CREATE POLICY "token_prices_select_all" ON token_prices FOR SELECT USING (true);
 -- Enable Realtime for token_prices so the chart can subscribe to live updates.
 -- If this errors with "already in publication", the table is already enabled.
 ALTER PUBLICATION supabase_realtime ADD TABLE token_prices;
+
+-- ticker_news: news articles per ticker (openai, anthropic, google, generic). Data is in Supabase only; run seed-ticker-news.sql in SQL Editor to populate.
+CREATE TABLE IF NOT EXISTS ticker_news (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticker_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  headline TEXT NOT NULL,
+  source TEXT NOT NULL,
+  time_ago TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticker_news_ticker_id ON ticker_news(ticker_id);
+
+ALTER TABLE ticker_news ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ticker_news_select_all" ON ticker_news;
+CREATE POLICY "ticker_news_select_all" ON ticker_news FOR SELECT USING (true);

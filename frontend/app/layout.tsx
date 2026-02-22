@@ -10,6 +10,13 @@ import {
 import { PostLoginPhaseProvider } from "@/contexts/PostLoginPhaseContext";
 import "./globals.css";
 
+export const metadata = {
+  title: "apiXchange",
+  icons: {
+    icon: "/aXclogo.png",
+  },
+};
+
 export default function RootLayout({
   children,
 }: {

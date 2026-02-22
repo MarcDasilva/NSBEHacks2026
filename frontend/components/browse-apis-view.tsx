@@ -27,6 +27,15 @@ import { Input } from "@/components/ui/input";
 import { motion } from "motion/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
+type NewsItem = {
+  id: string;
+  url: string;
+  headline: string;
+  source: string;
+  timeAgo: string;
+};
+
+
 /** Wraps content in motion.span; when key (e.g. value) changes, animates in. */
 function AnimatedValue({
   valueKey,
@@ -247,11 +256,14 @@ export function BrowseApisView() {
   const [chartData, setChartData] = useState<{ time: string; timeMs: number; price: number }[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartRange, setChartRange] = useState<"10m" | "1H" | "1D" | "1W" | "1M" | "1Y">("1H");
+  const [sellOrBuy, setSellOrBuy] = useState<"sell" | "buy">("sell");
   const [sellPrice, setSellPrice] = useState("");
   const [sellTokenCount, setSellTokenCount] = useState("");
   const [sellWalletId, setSellWalletId] = useState<string>("");
   const [wallets, setWallets] = useState<{ id: string; name: string }[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, { last: number; chg: number; chgPct: number }>>({});
+  const [panelNews, setPanelNews] = useState<NewsItem[]>([]);
+  const [panelNewsLoading, setPanelNewsLoading] = useState(false);
 
   const QUOTE_OPTIONS = [
     { value: "XRP", label: "XRP" },
@@ -286,17 +298,57 @@ export function BrowseApisView() {
     );
   }, []);
 
+  const loadPanelNews = useCallback(async (tickerId: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    setPanelNewsLoading(true);
+    const { data: rows, error } = await supabase
+      .from("ticker_news")
+      .select("id, url, headline, source, time_ago")
+      .eq("ticker_id", tickerId)
+      .order("sort_order");
+    if (error || !rows?.length) {
+      const { data: generic } = await supabase
+        .from("ticker_news")
+        .select("id, url, headline, source, time_ago")
+        .eq("ticker_id", "generic")
+        .order("sort_order");
+      setPanelNews(
+        (generic ?? []).map((r) => ({
+          id: String(r.id),
+          url: r.url ?? "",
+          headline: r.headline ?? "",
+          source: r.source ?? "",
+          timeAgo: r.time_ago ?? "",
+        }))
+      );
+    } else {
+      setPanelNews(
+        rows.map((r) => ({
+          id: String(r.id),
+          url: r.url ?? "",
+          headline: r.headline ?? "",
+          source: r.source ?? "",
+          timeAgo: r.time_ago ?? "",
+        }))
+      );
+    }
+    setPanelNewsLoading(false);
+  }, []);
+
   useEffect(() => {
     if (!selectedTicker) {
       setGraphPanelVisible(false);
+      setPanelNews([]);
       return;
     }
     loadWallets();
+    loadPanelNews(selectedTicker.id);
     const t = requestAnimationFrame(() => {
       requestAnimationFrame(() => setGraphPanelVisible(true));
     });
     return () => cancelAnimationFrame(t);
-  }, [selectedTicker, loadWallets]);
+  }, [selectedTicker, loadWallets, loadPanelNews]);
 
   useEffect(() => {
     if (!selectedTicker) {
@@ -775,14 +827,24 @@ export function BrowseApisView() {
                     </div>
                   )}
                 </div>
-                {/* Right section: Sell — touches right wall, compact */}
+                {/* Right section: Sell/Buy toggle — touches right wall, compact */}
                 <div className="flex w-36 shrink-0 flex-col gap-2 pr-2">
-                  <h3
-                    className="text-lg font-bold text-white"
-                    style={{ fontFamily: "var(--font-geist-pixel-line)" }}
-                  >
-                    Sell
-                  </h3>
+                  <div className="flex rounded-md bg-sidebar-accent/50 p-0.5" style={{ fontFamily: "var(--font-geist-sans)" }}>
+                    {(["sell", "buy"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setSellOrBuy(mode)}
+                        className={`flex-1 rounded px-2 py-1.5 text-sm font-medium capitalize transition-colors ${
+                          sellOrBuy === mode
+                            ? "bg-sidebar-accent text-sidebar-foreground shadow-sm"
+                            : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
                   <Select value={sellWalletId} onValueChange={setSellWalletId}>
                     <SelectTrigger
                       className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground"
@@ -818,11 +880,50 @@ export function BrowseApisView() {
                   />
                   <button
                     type="button"
-                    className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80"
+                    className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 capitalize"
                     style={{ fontFamily: "var(--font-geist-sans)" }}
                   >
-                    Submit
+                    {sellOrBuy === "sell" ? "Sell" : "Buy"}
                   </button>
+                </div>
+              </div>
+              {/* News — single row, headlines as links */}
+              <div className="mt-6 pl-0 pr-6">
+                <a
+                  href="#"
+                  className="mb-2 inline-block text-sm font-semibold text-white hover:text-sidebar-foreground/90"
+                  style={{ fontFamily: "var(--font-geist-pixel-line)" }}
+                >
+                  News &gt;
+                </a>
+                <div className="flex gap-4 overflow-x-auto pb-1 pt-1">
+                  {panelNewsLoading ? (
+                    <p className="text-sm text-sidebar-foreground/60" style={{ fontFamily: "var(--font-geist-sans)" }}>
+                      Loading news…
+                    </p>
+                  ) : panelNews.length === 0 ? (
+                    <p className="text-sm text-sidebar-foreground/60" style={{ fontFamily: "var(--font-geist-sans)" }}>
+                      No news. Run backend/supabase/seed-ticker-news.sql in Supabase SQL Editor to add articles.
+                    </p>
+                  ) : (
+                    panelNews.map((item) => (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-w-[200px] max-w-[260px] shrink-0 rounded-md border border-sidebar-border/50 bg-sidebar-accent/30 p-3 transition-colors hover:bg-sidebar-accent/50 hover:border-sidebar-border"
+                        style={{ fontFamily: "var(--font-geist-sans)" }}
+                      >
+                        <p className="mb-1 text-xs text-sidebar-foreground/70">
+                          {item.timeAgo} · {item.source}
+                        </p>
+                        <p className="text-sm font-medium leading-snug text-white line-clamp-2">
+                          {item.headline}
+                        </p>
+                      </a>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

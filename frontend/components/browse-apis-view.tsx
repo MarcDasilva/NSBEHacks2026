@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   IconFlagFilled,
   IconPlus,
@@ -17,6 +17,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import { Input } from "@/components/ui/input";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 type TickerRow = {
   id: string;
@@ -30,23 +38,163 @@ type TickerRow = {
 };
 
 const MOCK_BROWSE_TICKERS: TickerRow[] = [
-  { id: "openai", symbol: "OpenAI", logo: "/logos/openai-white.png", last: 25.01, chg: 0.2, chgPct: 0.8 },
-  { id: "anthropic", symbol: "Anthropic", logo: "/logos/claude-color.png", last: 18.5, chg: -0.47, chgPct: -2.55 },
-  { id: "google", symbol: "Google AI", logo: "/logos/gemini-color.png", last: 142.3, chg: 1.24, chgPct: 0.87 },
-  { id: "twilio", symbol: "Twilio", logo: "/logos/Twilio-Symbol.png", last: 52.4, chg: -1.84, chgPct: -3.4 },
-  { id: "elevenlabs", symbol: "ElevenLabs", logo: "/logos/elevenlabs-symbol.svg", last: 12.8, chg: 0.15, chgPct: 1.19 },
-  { id: "mistral", symbol: "Mistral", logo: "/logos/mistral.png", last: 34.2, chg: 0.71, chgPct: 2.12 },
-  { id: "cohere", symbol: "Cohere", logo: "/logos/cohere.png", last: 8.5, chg: 0.22, chgPct: 2.66 },
-  { id: "polygon", symbol: "Polygon", logo: "/logos/polygon.jpeg", last: 89.2, chg: 0.71, chgPct: 0.8 },
-  { id: "deepl", symbol: "DeepL", logo: "/logos/DeepL-Icon-Logo-Vector.svg--240x300.png", last: 22.0, chg: -0.1, chgPct: -0.45 },
-  { id: "gradium", symbol: "Gradium", logo: "/logos/gradium.png", last: 14.2, chg: 0.31, chgPct: 2.23 },
-  { id: "alpha-vantage", symbol: "Alpha Vantage", logo: "/logos/alpha%20vantage.png", last: 6.8, chg: -0.12, chgPct: -1.73 },
-  { id: "gecko", symbol: "Gecko", logo: "/logos/gecko-405ed53b475f61244130f95742a07da15f7ac30feeed5072812ae5c2d73b6194.svg", last: 19.4, chg: 0.88, chgPct: 4.75 },
-  { id: "google-maps", symbol: "Google Maps", logo: "/logos/Google_Maps_icon_(2020).svg.png", last: 98.0, chg: 1.2, chgPct: 1.24 },
-  { id: "clearbit", symbol: "Clearbit", logo: "/logos/clearbit.webp", last: 11.5, chg: 0.05, chgPct: 0.44 },
+  {
+    id: "openai",
+    symbol: "OpenAI",
+    logo: "/logos/openai-white.png",
+    last: 25.01,
+    chg: 0.2,
+    chgPct: 0.8,
+  },
+  {
+    id: "anthropic",
+    symbol: "Anthropic",
+    logo: "/logos/claude-color.png",
+    last: 18.5,
+    chg: -0.47,
+    chgPct: -2.55,
+  },
+  {
+    id: "google",
+    symbol: "Google AI",
+    logo: "/logos/gemini-color.png",
+    last: 142.3,
+    chg: 1.24,
+    chgPct: 0.87,
+  },
+  {
+    id: "twilio",
+    symbol: "Twilio",
+    logo: "/logos/Twilio-Symbol.png",
+    last: 52.4,
+    chg: -1.84,
+    chgPct: -3.4,
+  },
+  {
+    id: "elevenlabs",
+    symbol: "ElevenLabs",
+    logo: "/logos/elevenlabs-symbol.svg",
+    last: 12.8,
+    chg: 0.15,
+    chgPct: 1.19,
+  },
+  {
+    id: "mistral",
+    symbol: "Mistral",
+    logo: "/logos/mistral.png",
+    last: 34.2,
+    chg: 0.71,
+    chgPct: 2.12,
+  },
+  {
+    id: "cohere",
+    symbol: "Cohere",
+    logo: "/logos/cohere.png",
+    last: 8.5,
+    chg: 0.22,
+    chgPct: 2.66,
+  },
+  {
+    id: "polygon",
+    symbol: "Polygon",
+    logo: "/logos/polygon.jpeg",
+    last: 89.2,
+    chg: 0.71,
+    chgPct: 0.8,
+  },
+  {
+    id: "deepl",
+    symbol: "DeepL",
+    logo: "/logos/DeepL-Icon-Logo-Vector.svg--240x300.png",
+    last: 22.0,
+    chg: -0.1,
+    chgPct: -0.45,
+  },
+  {
+    id: "gradium",
+    symbol: "Gradium",
+    logo: "/logos/gradium.png",
+    last: 14.2,
+    chg: 0.31,
+    chgPct: 2.23,
+  },
+  {
+    id: "alpha-vantage",
+    symbol: "Alpha Vantage",
+    logo: "/logos/alpha%20vantage.png",
+    last: 6.8,
+    chg: -0.12,
+    chgPct: -1.73,
+  },
+  {
+    id: "gecko",
+    symbol: "Gecko",
+    logo: "/logos/gecko-405ed53b475f61244130f95742a07da15f7ac30feeed5072812ae5c2d73b6194.svg",
+    last: 19.4,
+    chg: 0.88,
+    chgPct: 4.75,
+  },
+  {
+    id: "google-maps",
+    symbol: "Google Maps",
+    logo: "/logos/Google_Maps_icon_(2020).svg.png",
+    last: 98.0,
+    chg: 1.2,
+    chgPct: 1.24,
+  },
+  {
+    id: "clearbit",
+    symbol: "Clearbit",
+    logo: "/logos/clearbit.webp",
+    last: 11.5,
+    chg: 0.05,
+    chgPct: 0.44,
+  },
 ];
 
 const ALL_TICKERS = MOCK_BROWSE_TICKERS;
+
+function computeLastChgFromData(
+  data: { timeMs: number; price: number }[]
+): { last: number; chg: number; chgPct: number } | null {
+  if (data.length === 0) return null;
+  const lastPoint = data[data.length - 1];
+  const last = lastPoint.price;
+  const dayAgoMs = lastPoint.timeMs - 24 * 60 * 60 * 1000;
+  let dayAgoPrice = last;
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i].timeMs <= dayAgoMs) {
+      dayAgoPrice = data[i].price;
+      break;
+    }
+  }
+  const chg = last - dayAgoPrice;
+  const chgPct = dayAgoPrice !== 0 ? (chg / dayAgoPrice) * 100 : 0;
+  return { last, chg, chgPct };
+}
+
+/** Legend: ticker id → token_name for Supabase token_prices (historical chart data) */
+export const TICKER_LEGEND: Record<string, string> = {
+  "google": "GGK",      // Google AI
+  "openai": "OAK",      // OpenAI
+  "anthropic": "ATK",   // Anthropic
+  "twilio": "TWI",
+  "elevenlabs": "EVL",
+  "mistral": "MST",
+  "cohere": "COH",
+  "polygon": "PLG",
+  "deepl": "DPL",
+  "gradium": "GRD",
+  "alpha-vantage": "AVT",
+  "gecko": "GCK",
+  "google-maps": "GMP",
+  "clearbit": "CLR",
+};
+
+/** token_name -> ticker id for looking up live prices */
+const ID_BY_TOKEN: Record<string, string> = Object.fromEntries(
+  Object.entries(TICKER_LEGEND).map(([id, name]) => [name, id])
+);
 
 export function BrowseApisView() {
   const [tickers, setTickers] = useState<TickerRow[]>([]);
@@ -57,6 +205,14 @@ export function BrowseApisView() {
   const [selectedTicker, setSelectedTicker] = useState<TickerRow | null>(null);
   const [graphPanelVisible, setGraphPanelVisible] = useState(false);
   const [quoteAsset, setQuoteAsset] = useState<string>("XRP");
+  const [chartData, setChartData] = useState<{ time: string; timeMs: number; price: number }[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartRange, setChartRange] = useState<"10m" | "1H" | "1D" | "1W" | "1M" | "1Y">("1M");
+  const [sellPrice, setSellPrice] = useState("");
+  const [sellTokenCount, setSellTokenCount] = useState("");
+  const [sellWalletId, setSellWalletId] = useState<string>("");
+  const [wallets, setWallets] = useState<{ id: string; name: string }[]>([]);
+  const [livePrices, setLivePrices] = useState<Record<string, { last: number; chg: number; chgPct: number }>>({});
 
   const QUOTE_OPTIONS = [
     { value: "XRP", label: "XRP" },
@@ -67,15 +223,124 @@ export function BrowseApisView() {
     { value: "TUSD", label: "TUSD" },
   ];
 
+  const loadWallets = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser?.id) return;
+    const { data: rows, error } = await supabase
+      .from("wallets")
+      .select("name, wallet_id")
+      .eq("user_id", authUser.id)
+      .order("created_at");
+    if (error) {
+      setWallets([]);
+      return;
+    }
+    const list = (rows ?? []).map((r) => ({
+      id: r.wallet_id ?? "",
+      name: (r.name?.trim() || r.wallet_id) ?? "Unnamed",
+    }));
+    setWallets(list);
+    setSellWalletId((prev) =>
+      list.length > 0 && (prev === "" || !list.some((w) => w.id === prev)) ? list[0].id : prev
+    );
+  }, []);
+
   useEffect(() => {
     if (!selectedTicker) {
       setGraphPanelVisible(false);
       return;
     }
+    loadWallets();
     const t = requestAnimationFrame(() => {
       requestAnimationFrame(() => setGraphPanelVisible(true));
     });
     return () => cancelAnimationFrame(t);
+  }, [selectedTicker, loadWallets]);
+
+  useEffect(() => {
+    if (!selectedTicker) {
+      setChartData([]);
+      return;
+    }
+    setChartLoading(true);
+    const supabase = getSupabase();
+    if (!supabase) {
+      setChartData([]);
+      setChartLoading(false);
+      return;
+    }
+    const tokenName = TICKER_LEGEND[selectedTicker.id] ?? selectedTicker.symbol;
+    supabase
+      .from("token_prices")
+      .select("price, price_time")
+      .eq("token_name", tokenName)
+      .order("price_time", { ascending: true })
+      .then(({ data, error }) => {
+        setChartLoading(false);
+        if (error) {
+          setChartData([]);
+          return;
+        }
+        const points = (data ?? []).map((r) => {
+          const timeStr = r.price_time ?? "";
+          const timeMs = new Date(timeStr).getTime();
+          return {
+            time: timeStr,
+            timeMs: Number.isNaN(timeMs) ? 0 : timeMs,
+            price: Number(r.price ?? 0),
+          };
+        });
+        setChartData(points);
+        const computed = computeLastChgFromData(points);
+        if (computed && selectedTicker)
+          setLivePrices((p) => ({ ...p, [selectedTicker.id]: computed }));
+      });
+  }, [selectedTicker]);
+
+  // Realtime: subscribe to token_prices for current ticker so chart updates when table changes
+  useEffect(() => {
+    if (!selectedTicker) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const tokenName = TICKER_LEGEND[selectedTicker.id] ?? selectedTicker.symbol;
+    const channel = supabase
+      .channel(`token_prices:${tokenName}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "token_prices",
+          filter: `token_name=eq.${tokenName}`,
+        },
+        (payload) => {
+          const row = payload.new as { price?: unknown; price_time?: string } | null;
+          if (!row?.price_time) return;
+          const timeStr = row.price_time;
+          const timeMs = new Date(timeStr).getTime();
+          if (Number.isNaN(timeMs)) return;
+          const point = {
+            time: timeStr,
+            timeMs,
+            price: Number(row.price ?? 0),
+          };
+          setChartData((prev) => {
+            const filtered = prev.filter((p) => p.timeMs !== timeMs);
+            const next = [...filtered, point].sort((a, b) => a.timeMs - b.timeMs);
+            const computed = computeLastChgFromData(next);
+            const tickerId = ID_BY_TOKEN[tokenName];
+            if (tickerId && computed)
+              setLivePrices((p) => ({ ...p, [tickerId]: computed }));
+            return next;
+          });
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [selectedTicker]);
 
   const loadFavourites = useCallback(async () => {
@@ -99,7 +364,12 @@ export function BrowseApisView() {
       .eq("id", authUser.id)
       .single();
     if (!userRow) {
-      await supabase.from("users").upsert({ id: authUser.id, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      await supabase
+        .from("users")
+        .upsert(
+          { id: authUser.id, updated_at: new Date().toISOString() },
+          { onConflict: "id" },
+        );
     }
     const { data: rows } = await supabase
       .from("user_favourite_tickers")
@@ -121,6 +391,37 @@ export function BrowseApisView() {
     loadFavourites();
   }, [loadFavourites]);
 
+  // Fetch last 2 days of token_prices to build live last/chg/chgPct (chg vs 24h ago) for all tickers
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    supabase
+      .from("token_prices")
+      .select("token_name, price, price_time")
+      .gte("price_time", twoDaysAgo)
+      .order("price_time", { ascending: true })
+      .then(({ data, error }) => {
+        if (error || !data?.length) return;
+        const byToken: Record<string, { timeMs: number; price: number }[]> = {};
+        for (const r of data) {
+          const name = r.token_name ?? "";
+          if (!byToken[name]) byToken[name] = [];
+          const timeMs = new Date(r.price_time ?? 0).getTime();
+          if (!Number.isNaN(timeMs))
+            byToken[name].push({ timeMs, price: Number(r.price ?? 0) });
+        }
+        const next: Record<string, { last: number; chg: number; chgPct: number }> = {};
+        for (const [tokenName, points] of Object.entries(byToken)) {
+          const id = ID_BY_TOKEN[tokenName];
+          if (!id) continue;
+          const computed = computeLastChgFromData(points);
+          if (computed) next[id] = computed;
+        }
+        setLivePrices((prev) => ({ ...prev, ...next }));
+      });
+  }, []);
+
   const addToFavourites = async (row: TickerRow) => {
     const supabase = getSupabase();
     if (supabase) {
@@ -128,10 +429,12 @@ export function BrowseApisView() {
         data: { user: authUser },
       } = await supabase.auth.getUser();
       if (authUser?.id) {
-        await supabase.from("user_favourite_tickers").upsert(
-          { user_id: authUser.id, ticker_id: row.id },
-          { onConflict: "user_id,ticker_id" }
-        );
+        await supabase
+          .from("user_favourite_tickers")
+          .upsert(
+            { user_id: authUser.id, ticker_id: row.id },
+            { onConflict: "user_id,ticker_id" },
+          );
       }
     }
     setTickers((prev) => prev.filter((t) => t.id !== row.id));
@@ -145,7 +448,11 @@ export function BrowseApisView() {
         data: { user: authUser },
       } = await supabase.auth.getUser();
       if (authUser?.id) {
-        await supabase.from("user_favourite_tickers").delete().eq("user_id", authUser.id).eq("ticker_id", row.id);
+        await supabase
+          .from("user_favourite_tickers")
+          .delete()
+          .eq("user_id", authUser.id)
+          .eq("ticker_id", row.id);
       }
     }
     setFavourites((prev) => prev.filter((f) => f.id !== row.id));
@@ -157,10 +464,67 @@ export function BrowseApisView() {
   };
 
   const formatNum = (n: number) =>
-    n >= 1000 ? n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : n.toFixed(2);
+    n >= 1000
+      ? n.toLocaleString("en-US", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        })
+      : n.toFixed(2);
+  /** More precise for chart axis/tooltip so small price differences are visible */
+  const formatChartPrice = (n: number) => {
+    if (n >= 1000) return n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    if (Math.abs(n) >= 1) return n.toFixed(3);
+    if (Math.abs(n) >= 0.01) return n.toFixed(4);
+    return n.toFixed(6);
+  };
   const formatChg = (n: number) =>
-    (n >= 0 ? "+" : "") + (n >= 1000 ? n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : n.toFixed(2));
+    (n >= 0 ? "+" : "") +
+    (n >= 1000
+      ? n.toLocaleString("en-US", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 2,
+        })
+      : n.toFixed(2));
   const formatPct = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+
+  const chartRangeMs = useMemo(() => {
+    const min = 60 * 1000;
+    const hour = 60 * min;
+    const day = 24 * hour;
+    return {
+      "10m": 10 * min,
+      "1H": hour,
+      "1D": day,
+      "1W": 7 * day,
+      "1M": 30 * day,
+      "1Y": 365 * day,
+    } as const;
+  }, []);
+
+  const filteredChartData = useMemo(() => {
+    if (chartData.length === 0) return [];
+    const endMs = chartData[chartData.length - 1].timeMs;
+    const rangeMs = chartRangeMs[chartRange];
+    const startMs = endMs - rangeMs;
+    const filtered = chartData.filter((d) => d.timeMs >= startMs && d.timeMs <= endMs);
+    return filtered.length > 0 ? filtered : chartData;
+  }, [chartData, chartRange, chartRangeMs]);
+
+  // Panel header: use real data when available (from chartData first, else livePrices), else mock
+  const panelPrice = useMemo(() => {
+    if (!selectedTicker) return null;
+    if (chartData.length > 0) {
+      const c = computeLastChgFromData(chartData);
+      if (c) return c;
+    }
+    const live = livePrices[selectedTicker.id];
+    if (live) return live;
+    return {
+      last: selectedTicker.last,
+      chg: selectedTicker.chg,
+      chgPct: selectedTicker.chgPct,
+    };
+  }, [selectedTicker, chartData, livePrices]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -173,7 +537,9 @@ export function BrowseApisView() {
         {selectedTicker && (
           <section
             className={`overflow-hidden rounded-lg border border-sidebar-border bg-sidebar transition-[opacity,transform] duration-300 ease-out ${
-              graphPanelVisible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+              graphPanelVisible
+                ? "translate-y-0 opacity-100"
+                : "translate-y-4 opacity-0"
             }`}
           >
             {/* Header: large logo + title beside, dropdown under title, close button */}
@@ -192,12 +558,21 @@ export function BrowseApisView() {
                     </span>
                   )}
                   <div className="flex flex-col gap-2">
-                    <span
-                      className="text-xl font-bold tracking-tight text-white"
-                      style={{ fontFamily: "var(--font-geist-sans)" }}
-                    >
-                      {selectedTicker.symbol}
-                    </span>
+                    <div className="flex items-baseline gap-2">
+                      <span
+                        className="text-xl font-bold tracking-tight text-white"
+                        style={{ fontFamily: "var(--font-geist-sans)" }}
+                      >
+                        {selectedTicker.symbol}
+                      </span>
+                      <span
+                        className="rounded bg-sidebar-accent px-1.5 py-0.5 text-xs font-medium tabular-nums text-sidebar-foreground/80"
+                        style={{ fontFamily: "var(--font-geist-sans)" }}
+                        title="token_name in token_prices table"
+                      >
+                        {TICKER_LEGEND[selectedTicker.id] ?? "—"}
+                      </span>
+                    </div>
                     {/* Dropdown: quote asset (default XRP, stable coins) — underneath the title */}
                     <Select value={quoteAsset} onValueChange={setQuoteAsset}>
                       <SelectTrigger className="h-9 w-[140px] border-sidebar-border bg-sidebar-accent/50 text-sidebar-foreground">
@@ -211,18 +586,26 @@ export function BrowseApisView() {
                         ))}
                       </SelectContent>
                     </Select>
-                    {/* Current price — underneath the dropdown */}
+                    {/* Current price — underneath the dropdown; use real data when available */}
                     <div className="flex flex-wrap items-baseline gap-2">
-                      <span className="text-2xl font-semibold tabular-nums text-white" style={{ fontFamily: "var(--font-geist-sans)" }}>
-                        {formatNum(selectedTicker.last)}
+                      <span
+                        className="text-2xl font-semibold tabular-nums text-white"
+                        style={{ fontFamily: "var(--font-geist-sans)" }}
+                      >
+                        {formatChartPrice(panelPrice?.last ?? selectedTicker.last)}
                       </span>
-                      <span className="text-sm text-sidebar-foreground/70">{quoteAsset}</span>
+                      <span className="text-sm text-sidebar-foreground/70">
+                        {quoteAsset}
+                      </span>
                       <span
                         className={`text-sm font-medium tabular-nums ${
-                          selectedTicker.chg >= 0 ? "text-green-500" : "text-red-500"
+                          (panelPrice?.chg ?? selectedTicker.chg) >= 0
+                            ? "text-green-500"
+                            : "text-red-500"
                         }`}
                       >
-                        {formatChg(selectedTicker.chg)} {formatPct(selectedTicker.chgPct)}
+                        {formatChg(panelPrice?.chg ?? selectedTicker.chg)}{" "}
+                        {formatPct(panelPrice?.chgPct ?? selectedTicker.chgPct)}
                       </span>
                     </div>
                   </div>
@@ -236,10 +619,164 @@ export function BrowseApisView() {
                 <IconX className="size-5" />
               </button>
             </div>
-            <div className="min-h-[320px] p-6">
-              {/* Graph placeholder — replace with actual chart component when ready */}
-              <div className="flex h-full min-h-[280px] w-full items-center justify-center rounded-md bg-sidebar-accent/30 text-sidebar-foreground/60" style={{ fontFamily: "var(--font-geist-sans)" }}>
-                Coming Soon...
+            <div className="min-h-[320px] pl-6 pr-0 py-6">
+              <div className="flex min-h-[280px] gap-3">
+                {/* Chart — narrower width */}
+                <div className="min-w-0 flex-1">
+                  {chartLoading ? (
+                    <div
+                      className="flex h-full min-h-[280px] w-full items-center justify-center rounded-md bg-sidebar-accent/30 text-sidebar-foreground/60"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    >
+                      Loading chart…
+                    </div>
+                  ) : chartData.length === 0 ? (
+                    <div
+                      className="flex h-full min-h-[280px] w-full items-center justify-center rounded-md bg-sidebar-accent/30 text-sidebar-foreground/60"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    >
+                      No historical data
+                    </div>
+                  ) : (
+                    <div className="relative h-full min-h-[280px]">
+                      <ChartContainer
+                        config={{
+                          price: {
+                            label: "Price",
+                            color: "var(--chart-1)",
+                          },
+                          time: { label: "Time" },
+                        } satisfies ChartConfig}
+                        className="aspect-auto h-[280px] min-h-[280px] w-full min-w-0"
+                      >
+                        <LineChart data={filteredChartData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-sidebar-border/50" vertical={false} />
+                          <XAxis
+                            dataKey="timeMs"
+                            type="number"
+                            domain={["dataMin", "dataMax"]}
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            minTickGap={40}
+                            tick={{ fill: "var(--sidebar-foreground)", fontSize: 11 }}
+                            tickFormatter={(value: number) => {
+                              const d = new Date(value);
+                              return chartRange === "10m" || chartRange === "1H" || chartRange === "1D"
+                                ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })
+                                : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                            }}
+                          />
+                          <YAxis
+                            orientation="right"
+                            domain={["dataMin", "dataMax"]}
+                            type="number"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            width={56}
+                            tick={{ fill: "var(--sidebar-foreground)", fontSize: 11 }}
+                            tickFormatter={(value) => formatChartPrice(value)}
+                          />
+                          <ChartTooltip
+                            cursor={{ stroke: "var(--sidebar-border)" }}
+                            content={
+                              <ChartTooltipContent
+                                labelFormatter={(_value, payload) => {
+                                  const point = Array.isArray(payload) && payload[0]?.payload;
+                                  const timeMs = point?.timeMs ?? (typeof point?.time === "string" ? new Date(point?.time).getTime() : NaN);
+                                  const d = new Date(timeMs);
+                                  if (Number.isNaN(d.getTime())) return "—";
+                                  return d.toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  });
+                                }}
+                                formatter={(value) => formatChartPrice(Number(value))}
+                              />
+                            }
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="price"
+                            stroke="var(--color-price)"
+                            strokeWidth={2}
+                            dot={false}
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ChartContainer>
+                      <div className="mt-3 flex gap-1">
+                        {(["10m", "1H", "1D", "1W", "1M", "1Y"] as const).map((range) => (
+                          <button
+                            key={range}
+                            type="button"
+                            onClick={() => setChartRange(range)}
+                            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                              chartRange === range
+                                ? "bg-sidebar-accent text-sidebar-foreground"
+                                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                            }`}
+                            style={{ fontFamily: "var(--font-geist-sans)" }}
+                          >
+                            {range}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Right section: Sell — touches right wall, compact */}
+                <div className="flex w-36 shrink-0 flex-col gap-2 pr-2">
+                  <h3
+                    className="text-lg font-bold text-white"
+                    style={{ fontFamily: "var(--font-geist-pixel-line)" }}
+                  >
+                    Sell
+                  </h3>
+                  <Select value={sellWalletId} onValueChange={setSellWalletId}>
+                    <SelectTrigger
+                      className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    >
+                      <SelectValue placeholder="Wallet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {wallets.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Price"
+                    value={sellPrice}
+                    onChange={(e) => setSellPrice(e.target.value)}
+                    className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+                    style={{ fontFamily: "var(--font-geist-sans)" }}
+                  />
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Token count"
+                    value={sellTokenCount}
+                    onChange={(e) => setSellTokenCount(e.target.value)}
+                    className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+                    style={{ fontFamily: "var(--font-geist-sans)" }}
+                  />
+                  <button
+                    type="button"
+                    className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80"
+                    style={{ fontFamily: "var(--font-geist-sans)" }}
+                  >
+                    Submit
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -277,7 +814,10 @@ export function BrowseApisView() {
           </div>
 
           <div className="overflow-hidden rounded-lg border border-sidebar-border bg-sidebar">
-            <table className="w-full border-collapse text-sm text-sidebar-foreground" style={{ fontFamily: "var(--font-geist-sans)" }}>
+            <table
+              className="w-full border-collapse text-sm text-sidebar-foreground"
+              style={{ fontFamily: "var(--font-geist-sans)" }}
+            >
               <thead>
                 <tr className="border-b border-sidebar-border text-sidebar-foreground/70">
                   <th className="py-4 pl-6 text-left font-medium">Symbol</th>
@@ -290,8 +830,12 @@ export function BrowseApisView() {
               <tbody>
                 {favourites.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-10 text-center text-sidebar-foreground/60">
-                      No favourited APIs yet. Click the flag on any API in Browse APIs to add it here.
+                    <td
+                      colSpan={5}
+                      className="py-10 text-center text-sidebar-foreground/60"
+                    >
+                      No favourited APIs yet. Click the flag on any API in
+                      Browse APIs to add it here.
                     </td>
                   </tr>
                 ) : (
@@ -302,7 +846,9 @@ export function BrowseApisView() {
                         key={row.id}
                         role="button"
                         tabIndex={0}
-                        onKeyDown={(e) => e.key === "Enter" && setSelectedTicker(row)}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && setSelectedTicker(row)
+                        }
                         onClick={() => setSelectedTicker(row)}
                         onMouseEnter={() => setHoveredFavId(row.id)}
                         onMouseLeave={() => setHoveredFavId(null)}
@@ -321,32 +867,38 @@ export function BrowseApisView() {
                               <IconFlagFilled className="size-4 text-destructive" />
                             </button>
                             {row.logo ? (
-                              <img src={row.logo} alt="" className="h-5 w-5 shrink-0 rounded-full object-contain bg-sidebar-accent" />
+                              <img
+                                src={row.logo}
+                                alt=""
+                                className="h-5 w-5 shrink-0 rounded-full object-contain bg-sidebar-accent"
+                              />
                             ) : (
                               <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
                                 {row.icon ?? row.symbol.slice(0, 1)}
                               </span>
                             )}
-                            <span className="font-medium text-sidebar-foreground">{row.symbol}</span>
+                            <span className="font-medium text-sidebar-foreground">
+                              {row.symbol}
+                            </span>
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sidebar-foreground/50" />
                           </div>
                         </td>
                         <td className="py-3 pr-6 text-right tabular-nums text-sidebar-foreground">
-                          {formatNum(row.last)}
+                          {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
                         </td>
                         <td
                           className={`py-3 pr-6 text-right tabular-nums ${
-                            row.chg >= 0 ? "text-green-500" : "text-red-500"
+                            (livePrices[row.id]?.chg ?? row.chg) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {formatChg(row.chg)}
+                          {formatChg(livePrices[row.id]?.chg ?? row.chg)}
                         </td>
                         <td
                           className={`py-3 pr-6 text-right tabular-nums ${
-                            row.chgPct >= 0 ? "text-green-500" : "text-red-500"
+                            (livePrices[row.id]?.chgPct ?? row.chgPct) >= 0 ? "text-green-500" : "text-red-500"
                           }`}
                         >
-                          {formatPct(row.chgPct)}
+                          {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
                         </td>
                         <td className="w-8 py-3 pr-4">
                           {isHovered ? (
@@ -403,7 +955,10 @@ export function BrowseApisView() {
           </div>
 
           <div className="overflow-hidden rounded-lg border border-sidebar-border bg-sidebar">
-            <table className="w-full border-collapse text-sm text-sidebar-foreground" style={{ fontFamily: "var(--font-geist-sans)" }}>
+            <table
+              className="w-full border-collapse text-sm text-sidebar-foreground"
+              style={{ fontFamily: "var(--font-geist-sans)" }}
+            >
               <thead>
                 <tr className="border-b border-sidebar-border text-sidebar-foreground/70">
                   <th className="py-4 pl-6 text-left font-medium">Symbol</th>
@@ -421,7 +976,9 @@ export function BrowseApisView() {
                       key={row.id}
                       role="button"
                       tabIndex={0}
-                      onKeyDown={(e) => e.key === "Enter" && setSelectedTicker(row)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && setSelectedTicker(row)
+                      }
                       onClick={() => setSelectedTicker(row)}
                       onMouseEnter={() => setHoveredId(row.id)}
                       onMouseLeave={() => setHoveredId(null)}
@@ -440,32 +997,38 @@ export function BrowseApisView() {
                             <IconFlagFilled className="size-4 opacity-30" />
                           </button>
                           {row.logo ? (
-                            <img src={row.logo} alt="" className="h-5 w-5 shrink-0 rounded-full object-contain bg-sidebar-accent" />
+                            <img
+                              src={row.logo}
+                              alt=""
+                              className="h-5 w-5 shrink-0 rounded-full object-contain bg-sidebar-accent"
+                            />
                           ) : (
                             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
                               {row.icon ?? row.symbol.slice(0, 1)}
                             </span>
                           )}
-                          <span className="font-medium text-sidebar-foreground">{row.symbol}</span>
+                          <span className="font-medium text-sidebar-foreground">
+                            {row.symbol}
+                          </span>
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sidebar-foreground/50" />
                         </div>
                       </td>
                       <td className="py-3 pr-6 text-right tabular-nums text-sidebar-foreground">
-                        {formatNum(row.last)}
+                        {formatChartPrice(livePrices[row.id]?.last ?? row.last)}
                       </td>
                       <td
                         className={`py-3 pr-6 text-right tabular-nums ${
-                          row.chg >= 0 ? "text-green-500" : "text-red-500"
+                          (livePrices[row.id]?.chg ?? row.chg) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatChg(row.chg)}
+                        {formatChg(livePrices[row.id]?.chg ?? row.chg)}
                       </td>
                       <td
                         className={`py-3 pr-6 text-right tabular-nums ${
-                          row.chgPct >= 0 ? "text-green-500" : "text-red-500"
+                          (livePrices[row.id]?.chgPct ?? row.chgPct) >= 0 ? "text-green-500" : "text-red-500"
                         }`}
                       >
-                        {formatPct(row.chgPct)}
+                        {formatPct(livePrices[row.id]?.chgPct ?? row.chgPct)}
                       </td>
                       <td className="w-8 py-3 pr-4">
                         {isHovered ? (

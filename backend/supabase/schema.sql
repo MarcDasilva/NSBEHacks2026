@@ -268,3 +268,24 @@ DROP POLICY IF EXISTS "user_fav_tickers_delete_own" ON user_favourite_tickers;
 CREATE POLICY "user_fav_tickers_select_own" ON user_favourite_tickers FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "user_fav_tickers_insert_own" ON user_favourite_tickers FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "user_fav_tickers_delete_own" ON user_favourite_tickers FOR DELETE USING (auth.uid() = user_id);
+
+-- token_prices: historical price data per token for charts (token_name, price, price_time)
+CREATE TABLE IF NOT EXISTS token_prices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  token_name TEXT NOT NULL,
+  price NUMERIC NOT NULL,
+  price_time TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_prices_token_name ON token_prices(token_name);
+CREATE INDEX IF NOT EXISTS idx_token_prices_price_time ON token_prices(price_time);
+
+ALTER TABLE token_prices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "token_prices_select_all" ON token_prices;
+CREATE POLICY "token_prices_select_all" ON token_prices FOR SELECT USING (true);
+
+-- Enable Realtime for token_prices so the chart can subscribe to live updates.
+-- If this errors with "already in publication", the table is already enabled.
+ALTER PUBLICATION supabase_realtime ADD TABLE token_prices;

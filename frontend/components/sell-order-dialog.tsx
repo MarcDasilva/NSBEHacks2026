@@ -28,15 +28,14 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:400
 async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<number | null> {
     try {
         // Query the order book for GGK/XRP sell offers
-        // TakerGets: XRP (what sellers want)
-        // TakerPays: GGK (what sellers are offering)
+        // For sell offers: taker gets GGK tokens and pays XRP
         const response = await client.request({
             command: "book_offers",
-            taker_gets: { currency: "XRP" },
-            taker_pays: {
+            taker_gets: {
                 currency: TOKEN_CURRENCY,
                 issuer: ISSUER_ADDRESS,
             },
+            taker_pays: { currency: "XRP" },
             limit: 100, // Get up to 100 offers
         });
 
@@ -50,16 +49,15 @@ async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<numbe
         let totalQuantity = 0;
 
         for (const offer of offers) {
-            // TakerGets is XRP (in drops) - what the seller wants
-            // TakerPays is GGK tokens - what the seller is offering
-            const xrpDrops = typeof offer.TakerGets === "string"
-                ? parseFloat(offer.TakerGets)
+            // For sell offers: TakerGets is GGK tokens, TakerPays is XRP (in drops)
+            const tokenAmount = typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+                ? parseFloat(offer.TakerGets.value)
+                : 0;
+
+            const xrpDrops = typeof offer.TakerPays === "string"
+                ? parseFloat(offer.TakerPays)
                 : 0;
             const xrpAmount = xrpDrops / 1_000_000;
-
-            const tokenAmount = typeof offer.TakerPays === "object" && "value" in offer.TakerPays
-                ? parseFloat(offer.TakerPays.value)
-                : 0;
 
             if (tokenAmount > 0 && xrpAmount > 0) {
                 // Price per unit = XRP / tokens

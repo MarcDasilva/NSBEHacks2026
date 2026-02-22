@@ -59,13 +59,14 @@ function generateProxyKey(): string {
 async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
   console.log("[DEBUG] TOKEN_CURRENCY:", TOKEN_CURRENCY);
   console.log("[DEBUG] ISSUER_ADDRESS:", ISSUER_ADDRESS);
+  // Query for sell offers: taker gets GGK tokens and pays XRP
   const response = await client.request({
     command: "book_offers",
-    taker_gets: { currency: "XRP" },
-    taker_pays: {
+    taker_gets: {
       currency: TOKEN_CURRENCY,
       issuer: ISSUER_ADDRESS,
     },
+    taker_pays: { currency: "XRP" },
     limit: 10,
   });
 
@@ -74,7 +75,7 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
 
   return offers
     .map((offer) => {
-      // Correct: TakerGets is GGK (object), TakerPays is XRP (string, drops)
+      // For sell offers: TakerGets is GGK (object), TakerPays is XRP (string, drops)
       const tokenAmount = typeof offer.TakerGets === "object" && "value" in offer.TakerGets
         ? parseFloat(offer.TakerGets.value)
         : 0;
@@ -95,6 +96,56 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
     })
     .filter((o): o is SellOffer => o !== null)
     .sort((a, b) => a.pricePerUnit - b.pricePerUnit);
+}
+
+/**
+ * Calculates the weighted average price from all sell offers
+ */
+async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<number | null> {
+  try {
+    const response = await client.request({
+      command: "book_offers",
+      taker_gets: {
+        currency: TOKEN_CURRENCY,
+        issuer: ISSUER_ADDRESS,
+      },
+      taker_pays: { currency: "XRP" },
+      limit: 100,
+    });
+
+    const offers = response.result.offers;
+    if (!offers || offers.length === 0) {
+      return null;
+    }
+
+    let totalWeightedPrice = 0;
+    let totalQuantity = 0;
+
+    for (const offer of offers) {
+      const tokenAmount = typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+        ? parseFloat(offer.TakerGets.value)
+        : 0;
+      const xrpDrops = typeof offer.TakerPays === "string"
+        ? parseFloat(offer.TakerPays)
+        : 0;
+      const xrpAmount = xrpDrops / 1_000_000;
+
+      if (tokenAmount > 0 && xrpAmount > 0) {
+        const pricePerUnit = xrpAmount / tokenAmount;
+        totalWeightedPrice += pricePerUnit * tokenAmount;
+        totalQuantity += tokenAmount;
+      }
+    }
+
+    if (totalQuantity === 0) {
+      return null;
+    }
+
+    return totalWeightedPrice / totalQuantity;
+  } catch (error) {
+    console.error("Error calculating weighted average price:", error);
+    return null;
+  }
 }
 
 export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
@@ -209,17 +260,16 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
       const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
 
       // Create an OfferCreate to buy tokens
-      // We're offering XRP (TakerPays for the counterparty = TakerGets for us)
-      // We want GGK tokens (TakerGets for the counterparty = TakerPays for us)
+      // Buyer offers XRP (TakerGets) and wants GGK tokens (TakerPays)
       const offerCreateTx: xrpl.OfferCreate = {
         TransactionType: "OfferCreate",
         Account: wallet.address,
-        TakerGets: {
+        TakerGets: totalDrops, // XRP in drops that buyer is offering
+        TakerPays: {
           currency: TOKEN_CURRENCY,
           value: quantity,
           issuer: ISSUER_ADDRESS,
-        },
-        TakerPays: totalDrops, // XRP in drops
+        }, // GGK tokens that buyer wants
         Flags: 0,
       };
 
@@ -284,6 +334,22 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
             token_name: TOKEN_CURRENCY,
             token_amount: qty,
           });
+        }
+
+        // Calculate and store the weighted average price
+        const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+        if (weightedAvgPrice !== null) {
+          const { error: priceInsertError } = await supabase
+            .from("token_prices")
+            .insert({
+              token_name: TOKEN_CURRENCY,
+              price: weightedAvgPrice,
+              price_time: new Date().toISOString(),
+            });
+
+          if (priceInsertError) {
+            console.error("Error storing token price:", priceInsertError);
+          }
         }
 
         setTxResult({

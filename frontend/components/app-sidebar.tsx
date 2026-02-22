@@ -8,10 +8,7 @@ import {
   IconDatabase,
   IconFileAi,
   IconFileDescription,
-  IconFileWord,
-  IconFolder,
   IconHelp,
-  IconInnerShadowTop,
   IconListDetails,
   IconReport,
   IconSearch,
@@ -35,9 +32,9 @@ import {
 
 const data = {
   user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
+    name: "User",
+    email: "",
+    avatar: "",
   },
   navMain: [
     {
@@ -54,11 +51,6 @@ const data = {
       title: "Analytics",
       url: "#",
       icon: IconChartBar,
-    },
-    {
-      title: "Projects",
-      url: "#",
-      icon: IconFolder,
     },
     {
       title: "Team",
@@ -142,11 +134,6 @@ const data = {
       url: "#",
       icon: IconReport,
     },
-    {
-      name: "Word Assistant",
-      url: "#",
-      icon: IconFileWord,
-    },
   ],
 }
 
@@ -159,10 +146,12 @@ type NavUserData = {
 export function AppSidebar({
   user,
   onLogout,
+  onAccountSaved,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   user: NavUserData
   onLogout?: () => void
+  onAccountSaved?: (updates: { name: string; avatar: string }) => void
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -171,11 +160,23 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:!p-1.5"
+              className="data-[slot=sidebar-menu-button]:!p-1.5 overflow-visible [&>a]:overflow-visible [&_span]:overflow-visible"
             >
-              <a href="#">
-                <IconInnerShadowTop className="!size-5" />
-                <span className="text-base font-semibold">Acme Inc.</span>
+              <a href="#" className="flex w-full justify-start pt-2.5">
+                <span
+                  style={{
+                    fontFamily: "var(--font-geist-pixel-line)",
+                    fontSize: "1.875rem",
+                    fontWeight: 500,
+                    letterSpacing: "-0.07em",
+                    lineHeight: 1.2,
+                    color: "#fff",
+                    display: "inline-block",
+                    paddingBottom: "0.05em",
+                  }}
+                >
+                  apiXchange
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -187,7 +188,7 @@ export function AppSidebar({
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} onLogout={onLogout} />
+        <NavUser user={user} onLogout={onLogout} onAccountSaved={onAccountSaved} />
       </SidebarFooter>
     </Sidebar>
   )

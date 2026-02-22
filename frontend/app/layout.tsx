@@ -22,6 +22,7 @@ export default function RootLayout({
       style={{ backgroundColor: "#0d0d0d" }}
     >
       <body
+        className={`${GeistSans.className} ${GeistMono.variable}`}
         style={{
           margin: 0,
           overflow: "hidden",

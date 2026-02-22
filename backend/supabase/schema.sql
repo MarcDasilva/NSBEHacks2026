@@ -73,3 +73,48 @@ CREATE INDEX IF NOT EXISTS idx_purchases_nft ON purchases(nft_token_id);
 -- Unique: one purchase per buyer per listing
 CREATE UNIQUE INDEX IF NOT EXISTS idx_purchases_unique
   ON purchases(buyer_wallet, listing_id);
+
+-- ═══════════════════════════════════════════════
+-- Users & Wallets (profile + billing)
+-- ═══════════════════════════════════════════════
+-- For profile picture uploads, create a storage bucket "avatars" (public) in
+-- Supabase Dashboard > Storage. The app uploads to avatars/<user_id>/avatar.<ext>
+-- users: one row per auth user (id = auth.uid())
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  display_name TEXT,
+  phone TEXT,
+  avatar_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- wallets: billing wallets per user (name + wallet_id)
+CREATE TABLE IF NOT EXISTS wallets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  wallet_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wallets_user ON wallets(user_id);
+
+-- RLS: users can only read/update/insert their own row
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_select_own" ON users;
+DROP POLICY IF EXISTS "users_insert_own" ON users;
+DROP POLICY IF EXISTS "users_update_own" ON users;
+CREATE POLICY "users_select_own" ON users FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "users_insert_own" ON users FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "users_update_own" ON users FOR UPDATE USING (auth.uid() = id);
+
+-- RLS: users can only manage their own wallets
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "wallets_select_own" ON wallets;
+DROP POLICY IF EXISTS "wallets_insert_own" ON wallets;
+DROP POLICY IF EXISTS "wallets_update_own" ON wallets;
+DROP POLICY IF EXISTS "wallets_delete_own" ON wallets;
+CREATE POLICY "wallets_select_own" ON wallets FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "wallets_insert_own" ON wallets FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "wallets_update_own" ON wallets FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "wallets_delete_own" ON wallets FOR DELETE USING (auth.uid() = user_id);

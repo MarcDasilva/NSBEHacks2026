@@ -13,14 +13,11 @@ import { ChartAreaInteractive } from "@/components/chart-area-interactive";
 import { DataTable } from "@/components/data-table";
 import { SectionCards } from "@/components/section-cards";
 import { SiteHeader } from "@/components/site-header";
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import data from "./data.json";
 
-const WELCOME_DURATION = 4;
+const WELCOME_DURATION = 3.5;
 
 type UserInfo = {
   name: string;
@@ -59,7 +56,10 @@ export default function DashboardPage() {
         "there";
       setFirstname(name);
       setUserInfo({
-        name: user?.user_metadata?.full_name || user?.user_metadata?.given_name || name,
+        name:
+          user?.user_metadata?.full_name ||
+          user?.user_metadata?.given_name ||
+          name,
         email: user?.email ?? "",
         avatar: user?.user_metadata?.avatar_url || "",
       });
@@ -125,14 +125,14 @@ export default function DashboardPage() {
   const showWelcome = phase === "welcome" || phase === "fading";
   const showDashboard = phase === "done" && userInfo;
 
-  // Fade in dashboard when it mounts (phase === "done")
+  // Fade up dashboard when it mounts (phase === "done"), same style as landing page
   useEffect(() => {
     if (phase !== "done" || !dashboardRef.current) return;
     const el = dashboardRef.current;
     gsap.fromTo(
       el,
-      { opacity: 0 },
-      { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" },
+      { opacity: 0, y: 24 },
+      { opacity: 1, y: 0, duration: 1.4, ease: "power3.out" },
     );
   }, [phase]);
 
@@ -201,6 +201,7 @@ export default function DashboardPage() {
           }}
         >
           <SidebarProvider
+            className="bg-transparent!"
             style={
               {
                 "--sidebar-width": "calc(var(--spacing) * 72)",
@@ -208,8 +209,19 @@ export default function DashboardPage() {
               } as React.CSSProperties
             }
           >
-            <AppSidebar user={userInfo} onLogout={handleSignOut} variant="inset" />
-            <SidebarInset>
+            <AppSidebar
+              user={userInfo}
+              onLogout={handleSignOut}
+              onAccountSaved={(updates) =>
+                setUserInfo((prev) =>
+                  prev
+                    ? { ...prev, name: updates.name, avatar: updates.avatar }
+                    : null
+                )
+              }
+              variant="inset"
+            />
+            <SidebarInset className="bg-transparent">
               <SiteHeader />
               <div className="flex flex-1 flex-col">
                 <div className="@container/main flex flex-1 flex-col gap-2">

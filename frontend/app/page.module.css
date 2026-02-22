@@ -12,7 +12,7 @@
   }
 }
 
-/* SDK window: glass effect, slightly rounded */
+/* SDK window: glass effect, slightly rounded (compact) */
 .sdkWindow {
   background: rgba(26, 26, 30, 0.8);
   backdrop-filter: blur(16px);
@@ -20,30 +20,29 @@
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 20px 20px;
-  max-width: 1200px;
+  background-size: 16px 16px;
+  max-width: 880px;
   margin-left: auto;
   margin-right: auto;
   width: 100%;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .sdkHeader {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sdkCode {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: clamp(0.65rem, 1.5vw, 0.8rem);
-  line-height: 1.55;
-  padding: 0.65rem 0.85rem;
+  font-size: clamp(0.55rem, 1.2vw, 0.68rem);
+  line-height: 1.45;
+  padding: 0.45rem 0.6rem;
   color: #d4d4d4;
   overflow: auto;
-  /* Preserve tabs and whitespace */
   white-space: pre-wrap;
   max-width: 100%;
   width: 100%;
@@ -52,8 +51,8 @@
 .sdkFooter {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.75rem;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -66,39 +65,38 @@
   }
 
   .sdkHeader {
-    padding: 0.4rem 0.5rem;
-    gap: 0.35rem;
+    padding: 0.28rem 0.4rem;
+    gap: 0.25rem;
   }
 
   .sdkHeader .sdkTraffic {
-    width: 8px !important;
-    height: 8px !important;
+    width: 6px !important;
+    height: 6px !important;
   }
 
   .sdkCode {
-    font-size: 0.6rem;
-    line-height: 1.5;
-    padding: 0.45rem 0.55rem;
-    /* Preserve tabs and whitespace on mobile */
+    font-size: 0.52rem;
+    line-height: 1.4;
+    padding: 0.35rem 0.45rem;
     white-space: pre-wrap;
     max-width: 100vw;
     width: 100vw;
   }
 
   .sdkCode .sdkLineNum {
-    width: 1.5em !important;
-    margin-right: 0.5rem !important;
-    font-size: 0.6rem !important;
+    width: 1.4em !important;
+    margin-right: 0.4rem !important;
+    font-size: 0.52rem !important;
   }
 
   .sdkFooter {
-    padding: 0.35rem 0.5rem;
-    gap: 0.35rem;
+    padding: 0.25rem 0.4rem;
+    gap: 0.25rem;
   }
 
   .sdkFooter .sdkIcon {
-    width: 22px !important;
-    height: 22px !important;
+    width: 18px !important;
+    height: 18px !important;
   }
 }
 

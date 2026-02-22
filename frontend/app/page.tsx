@@ -175,7 +175,7 @@ function tokenizePythonLine(line: string): Token[] {
   return tokens;
 }
 
-const PROXY_URL = process.env.NEXT_PUBLIC_PROXY_URL || "http://localhost:3000";
+const PROXY_URL = process.env.NEXT_PUBLIC_PROXY_URL || "http://18.209.63.122:3000";
 const proxyPath = `${PROXY_URL}${PROXY_URL.endsWith("/") ? "" : "/"}proxy`;
 
 const GEMINI_CODE = `const proxyUrl = "${proxyPath}";
@@ -428,7 +428,7 @@ export default function Home() {
           <div
             className={styles.sdkWindow}
             style={{
-              marginTop: "2rem",
+              marginTop: "1.25rem",
               marginLeft: "auto",
               marginRight: "auto",
               border: "1px solid rgba(255, 255, 255, 0.35)",
@@ -438,14 +438,14 @@ export default function Home() {
               pointerEvents: "auto",
             }}
           >
-            {/* Header: traffic lights + title + Python pill */}
+            {/* Header: traffic lights + title + JavaScript pill */}
             <div className={styles.sdkHeader}>
               <div style={{ display: "flex", gap: 5 }}>
                 <span
                   className={styles.sdkTraffic}
                   style={{
-                    width: 10,
-                    height: 10,
+                    width: 7,
+                    height: 7,
                     borderRadius: "50%",
                     backgroundColor: "#ff5f57",
                   }}
@@ -453,8 +453,8 @@ export default function Home() {
                 <span
                   className={styles.sdkTraffic}
                   style={{
-                    width: 10,
-                    height: 10,
+                    width: 7,
+                    height: 7,
                     borderRadius: "50%",
                     backgroundColor: "#febc2e",
                   }}
@@ -462,8 +462,8 @@ export default function Home() {
                 <span
                   className={styles.sdkTraffic}
                   style={{
-                    width: 10,
-                    height: 10,
+                    width: 7,
+                    height: 7,
                     borderRadius: "50%",
                     backgroundColor: "#28c840",
                   }}
@@ -472,16 +472,16 @@ export default function Home() {
               <div
                 style={{
                   marginLeft: "auto",
-                  padding: "0.2rem 0.5rem",
-                  borderRadius: 6,
+                  padding: "0.15rem 0.4rem",
+                  borderRadius: 5,
                   backgroundColor: "rgba(255,255,255,0.15)",
                   fontFamily: "var(--font-geist-sans)",
-                  fontSize: "0.7rem",
+                  fontSize: "0.6rem",
                   color: "#fff",
                   fontWeight: 500,
                 }}
               >
-                Python
+                JavaScript
               </div>
             </div>
 
@@ -499,7 +499,7 @@ export default function Home() {
               <span
                 style={{
                   fontFamily: "var(--font-geist-sans)",
-                  fontSize: "0.65rem",
+                  fontSize: "0.55rem",
                   color: "rgba(255,255,255,0.5)",
                   fontWeight: 500,
                   letterSpacing: "0.04em",
@@ -507,7 +507,7 @@ export default function Home() {
               >
                 USE IT WITH
               </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 {PROVIDERS.map((provider) => (
                   <button
                     key={provider.id}
@@ -515,8 +515,8 @@ export default function Home() {
                     onClick={() => setActiveProvider(provider.id)}
                     className={[styles.sdkIcon, styles.sdkIconBtn].join(" ")}
                     style={{
-                      width: 30,
-                      height: 30,
+                      width: 22,
+                      height: 22,
                       borderRadius: "50%",
                       backgroundColor:
                         activeProvider === provider.id
@@ -537,8 +537,8 @@ export default function Home() {
                     <Image
                       src={provider.logo}
                       alt={provider.id}
-                      width={18}
-                      height={18}
+                      width={14}
+                      height={14}
                       style={{ objectFit: "contain" }}
                     />
                   </button>
@@ -634,8 +634,8 @@ function CodeLine({
         className={styles.sdkLineNum}
         style={{
           display: "inline-block",
-          width: "2em",
-          marginRight: "1rem",
+          width: "1.75em",
+          marginRight: "0.75rem",
           color: "#6e7681",
           userSelect: "none",
           flexShrink: 0,

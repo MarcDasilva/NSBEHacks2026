@@ -35,13 +35,14 @@ async function calculateWeightedAveragePrice(
   tokenConfig: TokenConfig,
 ): Promise<number | null> {
   try {
+    // Query sell side: taker gets tokens, taker pays XRP
     const response = await client.request({
       command: "book_offers",
-      taker_gets: { currency: "XRP" },
-      taker_pays: {
+      taker_gets: {
         currency: tokenConfig.currency,
         issuer: tokenConfig.issuer,
       },
+      taker_pays: { currency: "XRP" },
       limit: 100,
     });
 
@@ -55,19 +56,18 @@ async function calculateWeightedAveragePrice(
     let totalQuantity = 0;
 
     for (const offer of offers) {
-      // TakerGets is XRP (in drops) - what the seller wants
-      // TakerPays is GGK tokens - what the seller is offering
-      const xrpDrops =
-        typeof offer.TakerGets === "string" ? parseFloat(offer.TakerGets) : 0;
-      const xrpAmount = xrpDrops / 1_000_000;
-
+      // TakerGets is tokens (object) - what the taker/buyer receives
+      // TakerPays is XRP (string, drops) - what the taker/buyer pays
       const tokenAmount =
-        typeof offer.TakerPays === "object" && "value" in offer.TakerPays
-          ? parseFloat(offer.TakerPays.value)
+        typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+          ? parseFloat(offer.TakerGets.value)
           : 0;
 
+      const xrpDrops =
+        typeof offer.TakerPays === "string" ? parseFloat(offer.TakerPays) : 0;
+      const xrpAmount = xrpDrops / 1_000_000;
+
       if (tokenAmount > 0 && xrpAmount > 0) {
-        // Price per unit = XRP / tokens
         const pricePerUnit = xrpAmount / tokenAmount;
         totalWeightedPrice += pricePerUnit * tokenAmount;
         totalQuantity += tokenAmount;

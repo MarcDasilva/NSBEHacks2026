@@ -97,6 +97,7 @@ function generateProxyKey(): string {
 async function fetchBestSellOffers(
   client: xrpl.Client,
   tokenConfig: TokenConfig,
+  excludeAccount?: string,
 ): Promise<SellOffer[]> {
   // Query for sell offers: taker gets tokens and pays XRP
   const response = await client.request({
@@ -139,6 +140,7 @@ async function fetchBestSellOffers(
       };
     })
     .filter((o): o is SellOffer => o !== null)
+    .filter((o) => !excludeAccount || o.account !== excludeAccount)
     .sort((a, b) => a.pricePerUnit - b.pricePerUnit);
 }
 
@@ -163,20 +165,44 @@ function computeFillAcrossOffers(
 }
 
 /**
- * Weighted average of sell offers (same book as fetchBestSellOffers): XRP per token.
+ * Get the token balance for an account on a specific trust line.
+ */
+async function getTokenBalance(
+  client: xrpl.Client,
+  account: string,
+  tokenConfig: TokenConfig,
+): Promise<number> {
+  try {
+    const response = await client.request({
+      command: "account_lines",
+      account,
+      peer: tokenConfig.issuer,
+    });
+    const line = response.result.lines.find(
+      (l) => l.currency === tokenConfig.currency,
+    );
+    return line ? parseFloat(line.balance) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Weighted average of sell offers: XRP per token.
  */
 async function calculateWeightedAveragePrice(
   client: xrpl.Client,
   tokenConfig: TokenConfig,
 ): Promise<number | null> {
   try {
+    // Query sell side: taker gets tokens, taker pays XRP
     const response = await client.request({
       command: "book_offers",
-      taker_gets: { currency: "XRP" },
-      taker_pays: {
+      taker_gets: {
         currency: tokenConfig.currency,
         issuer: tokenConfig.issuer,
       },
+      taker_pays: { currency: "XRP" },
       limit: 100,
     });
     const offers = response.result.offers;
@@ -184,13 +210,13 @@ async function calculateWeightedAveragePrice(
     let totalWeightedPrice = 0;
     let totalQuantity = 0;
     for (const offer of offers) {
-      const xrpDrops =
-        typeof offer.TakerGets === "string" ? parseFloat(offer.TakerGets) : 0;
-      const xrpAmount = xrpDrops / 1_000_000;
       const tokenAmount =
-        typeof offer.TakerPays === "object" && "value" in offer.TakerPays
-          ? parseFloat(offer.TakerPays.value)
+        typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+          ? parseFloat(offer.TakerGets.value)
           : 0;
+      const xrpDrops =
+        typeof offer.TakerPays === "string" ? parseFloat(offer.TakerPays) : 0;
+      const xrpAmount = xrpDrops / 1_000_000;
       if (tokenAmount > 0 && xrpAmount > 0) {
         const pricePerUnit = xrpAmount / tokenAmount;
         totalWeightedPrice += pricePerUnit * tokenAmount;
@@ -215,10 +241,9 @@ export type BuyOrderResult = {
 
 /**
  * Execute a buy order using the given quantity and wallet secret.
- * Fetches best offer, sets trust line, creates offer, burns tokens, stores proxy key and balance.
- * Use this from the graph panel (no dialog) or from the dialog.
- * @param walletId Optional wallet_id to link the proxy key to (for Order Book per-wallet buy orders).
- * @param tokenConfig Token to buy (from graph/API context). Defaults to GGK when omitted.
+ * Supports partial fills — buys whatever is available on the order book.
+ * Sets trust line, creates ImmediateOrCancel offer, burns received tokens,
+ * stores proxy key and balance.
  */
 export async function executeBuyOrder(
   quantity: string,
@@ -252,19 +277,15 @@ export async function executeBuyOrder(
   const client = new xrpl.Client(XRPL_SERVER);
   await client.connect();
   try {
-    const getOffers = async () => fetchBestSellOffers(client, cfg);
+    const offers = await fetchBestSellOffers(client, cfg, wallet.address);
+    if (offers.length === 0) throw new Error("No sell offers available on the order book (your own offers are excluded). A different account must place a sell order first.");
 
-    let offers = await getOffers();
-    if (offers.length === 0) throw new Error("No sell offers available");
+    // Compute cost for whatever is available (partial fill OK)
+    const { totalXrpCost, filledQty } = computeFillAcrossOffers(offers, qty);
+    const buyQty = filledQty; // actual quantity we can buy
+    const buyQtyStr = String(buyQty);
 
-    let { totalXrpCost, filledQty } = computeFillAcrossOffers(offers, qty);
-    if (filledQty < qty) {
-      throw new Error(
-        `Not enough liquidity. Available: ${filledQty.toLocaleString()} tokens across the order book.`,
-      );
-    }
-
-    // XRPL requires balance >= offer amount + base reserve (~10 XRP); owner reserve for the offer adds more
+    // XRPL requires balance >= offer amount + base reserve (~10 XRP)
     const BASE_RESERVE_XRP = 10;
     const OWNER_RESERVE_XRP = 2;
     const minXrpRequired = totalXrpCost + BASE_RESERVE_XRP + OWNER_RESERVE_XRP;
@@ -276,6 +297,7 @@ export async function executeBuyOrder(
       );
     }
 
+    // Set up trust line
     const trustSetTx: xrpl.TrustSet = {
       TransactionType: "TrustSet",
       Account: wallet.address,
@@ -299,55 +321,51 @@ export async function executeBuyOrder(
       );
     }
 
-    let result!: Awaited<ReturnType<xrpl.Client["submitAndWait"]>>;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) {
-        offers = await getOffers();
-        if (offers.length === 0) {
-          throw new Error(
-            "Order could not be filled (no offers available). Try again.",
-          );
-        }
-        const refill = computeFillAcrossOffers(offers, qty);
-        if (refill.filledQty < qty) {
-          throw new Error(
-            `Order could not be filled (not enough liquidity). Available: ${refill.filledQty.toLocaleString()} tokens. Try a smaller quantity or try again.`,
-          );
-        }
-        totalXrpCost = refill.totalXrpCost;
-      }
-      const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
-      const offerCreateTx: xrpl.OfferCreate = {
-        TransactionType: "OfferCreate",
-        Account: wallet.address,
-        TakerGets: totalDrops,
-        TakerPays: {
-          currency: cfg.currency,
-          value: quantity,
-          issuer: cfg.issuer,
-        },
-        Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
-      };
-      const prepared = await client.autofill(offerCreateTx);
-      const signed = wallet.sign(prepared);
-      result = await client.submitAndWait(signed.tx_blob);
-      const meta = result.result.meta as xrpl.TransactionMetadata;
-      if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS")
-        break;
-      const err =
-        typeof meta === "object" ? meta.TransactionResult : "Unknown error";
-      if (err !== "tecKILLED" || attempt > 0) {
-        throw new Error(formatTransactionError(err));
-      }
+    // Record token balance before the offer so we can determine actual fill
+    const balanceBefore = await getTokenBalance(client, wallet.address, cfg);
+
+    // Create ImmediateOrCancel offer — fills as much as possible
+    const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
+    const offerCreateTx: xrpl.OfferCreate = {
+      TransactionType: "OfferCreate",
+      Account: wallet.address,
+      TakerGets: totalDrops,
+      TakerPays: {
+        currency: cfg.currency,
+        value: buyQtyStr,
+        issuer: cfg.issuer,
+      },
+      Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
+    };
+    const prepared = await client.autofill(offerCreateTx);
+    const signed = wallet.sign(prepared);
+    const result = await client.submitAndWait(signed.tx_blob);
+    const meta = result.result.meta as xrpl.TransactionMetadata;
+
+    // tesSUCCESS = filled (fully or partially). tecKILLED = nothing filled at all.
+    if (typeof meta === "object" && meta.TransactionResult !== "tesSUCCESS") {
+      const err = meta.TransactionResult;
+      throw new Error(formatTransactionError(err));
     }
 
+    // Determine actual tokens received
+    const balanceAfter = await getTokenBalance(client, wallet.address, cfg);
+    const actualReceived = Math.max(0, balanceAfter - balanceBefore);
+
+    if (actualReceived <= 0) {
+      throw new Error("Order was submitted but no tokens were received. The offers may have been taken by someone else.");
+    }
+
+    const actualReceivedStr = String(actualReceived);
+
+    // Burn only the tokens we actually received
     const burnTx: xrpl.Payment = {
       TransactionType: "Payment",
       Account: wallet.address,
       Destination: cfg.issuer,
       Amount: {
         currency: cfg.currency,
-        value: quantity,
+        value: actualReceivedStr,
         issuer: cfg.issuer,
       },
     };
@@ -366,6 +384,7 @@ export async function executeBuyOrder(
       throw new Error(`Failed to burn tokens after purchase: ${burnErr}`);
     }
 
+    // Store proxy key
     const { data: apiKeyTx } = await supabase
       .from("api_key_transactions")
       .select("api_key")
@@ -381,6 +400,7 @@ export async function executeBuyOrder(
       ...(walletId && { wallet_id: walletId }),
     });
 
+    // Update user token balance
     const { data: existingTokens, error: selectError } = await supabase
       .from("user_api_tokens")
       .select("id, token_amount")
@@ -390,7 +410,7 @@ export async function executeBuyOrder(
     if (selectError)
       console.error("Error checking existing tokens:", selectError);
     if (existingTokens) {
-      const newAmount = existingTokens.token_amount + qty;
+      const newAmount = existingTokens.token_amount + actualReceived;
       await supabase
         .from("user_api_tokens")
         .update({
@@ -402,10 +422,11 @@ export async function executeBuyOrder(
       await supabase.from("user_api_tokens").insert({
         user_id: user.id,
         token_name: cfg.currency,
-        token_amount: qty,
+        token_amount: actualReceived,
       });
     }
 
+    // Record weighted average price
     const weightedAvgPrice = await calculateWeightedAveragePrice(client, cfg);
     if (weightedAvgPrice !== null) {
       await supabase.from("token_prices").insert({
@@ -415,11 +436,14 @@ export async function executeBuyOrder(
       });
     }
 
+    // Estimate actual XRP paid based on what we received vs what we planned
+    const xrpPaid = buyQty > 0 ? totalXrpCost * (actualReceived / buyQty) : 0;
+
     return {
       hash: result.result.hash,
       proxyKey,
-      tokensReceived: qty,
-      xrpPaid: totalXrpCost,
+      tokensReceived: actualReceived,
+      xrpPaid,
       burnHash: burnResult.result.hash,
     };
   } finally {
@@ -555,12 +579,7 @@ export function BuyOrderDialog({
     }
 
     if (allOffers.length === 0) {
-      newErrors.general = "No sell offers available";
-    } else {
-      const { filledQty } = computeFillAcrossOffers(allOffers, qty);
-      if (filledQty < qty) {
-        newErrors.quantity = `Not enough liquidity. Available: ${filledQty.toLocaleString()} tokens (fills across multiple offers).`;
-      }
+      newErrors.general = "No sell offers available on the order book";
     }
 
     setErrors(newErrors);
@@ -594,8 +613,8 @@ export function BuyOrderDialog({
     const qty = parseFloat(quantity) || 0;
     if (!qty || allOffers.length === 0) return "N/A";
     const { totalXrpCost, filledQty } = computeFillAcrossOffers(allOffers, qty);
-    if (filledQty < qty) return "N/A";
-    return totalXrpCost.toFixed(6);
+    if (filledQty <= 0) return "N/A";
+    return `${totalXrpCost.toFixed(6)} (for ${filledQty.toLocaleString()} tokens)`;
   };
 
   const totalAvailable = allOffers.reduce((s, o) => s + o.quantity, 0);
@@ -627,6 +646,7 @@ export function BuyOrderDialog({
               <DialogTitle>Buy {effectiveTokenConfig.currency} Tokens</DialogTitle>
               <DialogDescription>
                 Purchase tokens from the XRP Ledger DEX and get a proxy API key.
+                Partial fills are supported.
               </DialogDescription>
             </DialogHeader>
 
@@ -649,8 +669,7 @@ export function BuyOrderDialog({
                       token
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Available: {totalAvailable.toLocaleString()} tokens (order
-                      fills across multiple offers)
+                      Available: {totalAvailable.toLocaleString()} tokens
                     </p>
                   </>
                 ) : (
@@ -691,7 +710,6 @@ export function BuyOrderDialog({
                   type="number"
                   step="any"
                   min="0"
-                  max={totalAvailable || undefined}
                   placeholder="e.g., 100"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
@@ -701,14 +719,18 @@ export function BuyOrderDialog({
                 {errors.quantity && (
                   <p className="text-sm text-destructive">{errors.quantity}</p>
                 )}
+                {bestOffer && parseFloat(quantity) > totalAvailable && totalAvailable > 0 && (
+                  <p className="text-sm text-yellow-500">
+                    Only {totalAvailable.toLocaleString()} tokens available — order will partially fill.
+                  </p>
+                )}
               </div>
 
               {quantity && bestOffer && (
                 <div className="rounded-md bg-green-500/10 p-3">
                   <p className="text-sm font-medium">Order Summary</p>
                   <p className="text-sm text-muted-foreground">
-                    Buying {quantity} {effectiveTokenConfig.currency} for{" "}
-                    {estimatedCost()} XRP
+                    Est. cost: {estimatedCost()} XRP
                   </p>
                 </div>
               )}

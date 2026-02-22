@@ -591,7 +591,7 @@ export function BrowseApisView() {
     };
   }, [loaded]);
 
-  // Fetch best sell offer price from XRPL when in buy mode
+  // Fetch best sell offer price from XRPL when in buy mode (excludes buyer's own offers)
   useEffect(() => {
     if (sellOrBuy !== "buy" || !selectedTicker) {
       setBestBuyPrice(null);
@@ -600,6 +600,30 @@ export function BrowseApisView() {
     let cancelled = false;
     const fetchBest = async () => {
       setBestBuyPriceLoading(true);
+
+      // Derive the buyer's XRPL address so we can exclude their own offers
+      let buyerAddress: string | null = null;
+      if (sellWalletId) {
+        const supabase = getSupabase();
+        if (supabase) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: walletRow } = await supabase
+              .from("wallets")
+              .select("wallet_secret")
+              .eq("user_id", user.id)
+              .eq("wallet_id", sellWalletId)
+              .maybeSingle();
+            const secret = walletRow?.wallet_secret?.trim();
+            if (secret) {
+              try {
+                buyerAddress = xrpl.Wallet.fromSeed(secret).address;
+              } catch { /* ignore invalid secrets */ }
+            }
+          }
+        }
+      }
+
       const cfg = getTokenConfig(selectedTicker.id);
       const client = new xrpl.Client(XRPL_SERVER);
       try {
@@ -611,10 +635,12 @@ export function BrowseApisView() {
             issuer: cfg.issuer,
           },
           taker_pays: { currency: "XRP" },
-          limit: 1,
+          limit: 10,
         });
         if (cancelled) return;
-        const offers = response.result.offers || [];
+        const offers = (response.result.offers || []).filter(
+          (offer) => !buyerAddress || offer.Account !== buyerAddress,
+        );
         if (offers.length > 0) {
           const offer = offers[0];
           const tokenAmount =
@@ -641,7 +667,7 @@ export function BrowseApisView() {
     };
     fetchBest();
     return () => { cancelled = true; };
-  }, [sellOrBuy, selectedTicker]);
+  }, [sellOrBuy, selectedTicker, sellWalletId]);
 
   const addToFavourites = async (row: TickerRow) => {
     const supabase = getSupabase();
@@ -1026,7 +1052,7 @@ export function BrowseApisView() {
                     disabled={
                       sellOrBuy === "sell"
                         ? sellLoading
-                        : buyLoading || bestBuyPrice === null
+                        : buyLoading
                     }
                     onClick={async () => {
                       const supabase = getSupabase();
@@ -1070,8 +1096,12 @@ export function BrowseApisView() {
                             sellWalletId,
                             getTokenConfig(selectedTicker?.id),
                           );
+                          const requested = parseFloat(sellTokenCount);
+                          const partial = result.tokensReceived < requested
+                            ? ` (partial fill — ${requested} requested)`
+                            : "";
                           toast.success(
-                            `Purchased ${result.tokensReceived} tokens. View your proxy key in Order Book.`,
+                            `Purchased ${result.tokensReceived} tokens${partial}. View your proxy key in Order Book.`,
                             { position: "bottom-right" },
                           );
                         } catch (err) {

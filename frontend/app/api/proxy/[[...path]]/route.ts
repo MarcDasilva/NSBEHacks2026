@@ -49,7 +49,6 @@ async function proxy(
     method: request.method,
     headers,
     body: request.body,
-    duplex: "half",
   });
 
   const resHeaders = new Headers(res.headers);

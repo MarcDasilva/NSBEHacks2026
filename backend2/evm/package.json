@@ -1,0 +1,13 @@
+{
+  "name": "backend2-evm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "hardhat": "^2.22.17",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0"
+  }
+}
+

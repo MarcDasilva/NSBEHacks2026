@@ -1,0 +1,40 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/Users/mysticalboom/Documents/GitHub/NSBEHacks2026/backend2/evm/contracts/Escrow.sol": {
+      "lastModificationDate": 1771739594533,
+      "contentHash": "c3993a8e1a254d7136405ee083029ab6",
+      "sourceName": "contracts/Escrow.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "Escrow"
+      ]
+    }
+  }
+}

@@ -175,7 +175,10 @@ function tokenizePythonLine(line: string): Token[] {
   return tokens;
 }
 
-const GEMINI_CODE = `const proxyUrl = "http://localhost:3000/proxy";
+const PROXY_URL = process.env.NEXT_PUBLIC_PROXY_URL || "http://localhost:3000";
+const proxyPath = `${PROXY_URL}${PROXY_URL.endsWith("/") ? "" : "/"}proxy`;
+
+const GEMINI_CODE = `const proxyUrl = "${proxyPath}";
 const targetUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 const apiKey = "<your api key>"
 const payload = {contents: [parts: [{text: "Explain how AI works in a few words"}]}]};
@@ -200,7 +203,7 @@ const payload = {
     store: true
 };
 
-const response = await fetch("http:localhost:3000/proxy?api_type=openai&target=" + encodeURI(url), {
+const response = await fetch("${proxyPath}?api_type=openai&target=" + encodeURIComponent(url), {
     method: "POST",
     headers: {
         "Content-Type": "application/json",
@@ -220,7 +223,7 @@ const payload = {
 };
 
 const response = await fetch(
-    "http://localhost:3000/proxy?api_type=anthropic&target=" + encodeURIComponent(url),
+    "${proxyPath}?api_type=anthropic&target=" + encodeURIComponent(url),
     {
         method: "POST",
         headers: {

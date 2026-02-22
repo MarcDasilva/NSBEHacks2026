@@ -92,7 +92,7 @@ function generateProxyKey(): string {
 }
 
 /**
- * Fetches the best sell offers from the order book
+ * Fetches the best sell offers from the XRPL order book.
  */
 async function fetchBestSellOffers(
   client: xrpl.Client,

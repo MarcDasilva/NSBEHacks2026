@@ -10,7 +10,8 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { getSupabase } from "@/lib/supabase/client";
-import { getTokenConfig, TICKER_LEGEND } from "@/lib/token-config";
+import * as xrpl from "xrpl";
+import { getTokenConfig, XRPL_SERVER, TICKER_LEGEND } from "@/lib/token-config";
 import {
   Select,
   SelectContent,
@@ -257,6 +258,8 @@ export function BrowseApisView() {
   const [sellSuccess, setSellSuccess] = useState("");
   const [sellLoading, setSellLoading] = useState(false);
   const [buyLoading, setBuyLoading] = useState(false);
+  const [bestBuyPrice, setBestBuyPrice] = useState<number | null>(null);
+  const [bestBuyPriceLoading, setBestBuyPriceLoading] = useState(false);
 
   const QUOTE_OPTIONS = [
     { value: "XRP", label: "XRP" },
@@ -587,6 +590,58 @@ export function BrowseApisView() {
       supabase.removeChannel(channel);
     };
   }, [loaded]);
+
+  // Fetch best sell offer price from XRPL when in buy mode
+  useEffect(() => {
+    if (sellOrBuy !== "buy" || !selectedTicker) {
+      setBestBuyPrice(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchBest = async () => {
+      setBestBuyPriceLoading(true);
+      const cfg = getTokenConfig(selectedTicker.id);
+      const client = new xrpl.Client(XRPL_SERVER);
+      try {
+        await client.connect();
+        const response = await client.request({
+          command: "book_offers",
+          taker_gets: {
+            currency: cfg.currency,
+            issuer: cfg.issuer,
+          },
+          taker_pays: { currency: "XRP" },
+          limit: 1,
+        });
+        if (cancelled) return;
+        const offers = response.result.offers || [];
+        if (offers.length > 0) {
+          const offer = offers[0];
+          const tokenAmount =
+            typeof offer.TakerGets === "object" && "value" in offer.TakerGets
+              ? parseFloat(offer.TakerGets.value)
+              : 0;
+          const xrpDrops =
+            typeof offer.TakerPays === "string" ? offer.TakerPays : "0";
+          const xrpAmount = parseFloat(xrpDrops) / 1_000_000;
+          if (tokenAmount > 0 && xrpAmount > 0) {
+            setBestBuyPrice(xrpAmount / tokenAmount);
+          } else {
+            setBestBuyPrice(null);
+          }
+        } else {
+          setBestBuyPrice(null);
+        }
+      } catch {
+        if (!cancelled) setBestBuyPrice(null);
+      } finally {
+        await client.disconnect().catch(() => {});
+        if (!cancelled) setBestBuyPriceLoading(false);
+      }
+    };
+    fetchBest();
+    return () => { cancelled = true; };
+  }, [sellOrBuy, selectedTicker]);
 
   const addToFavourites = async (row: TickerRow) => {
     const supabase = getSupabase();
@@ -935,15 +990,28 @@ export function BrowseApisView() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Price"
-                    value={sellPrice}
-                    onChange={(e) => setSellPrice(e.target.value)}
-                    className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground placeholder:text-sidebar-foreground/50"
-                    style={{ fontFamily: "var(--font-geist-sans)" }}
-                  />
+                  {sellOrBuy === "sell" ? (
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Price"
+                      value={sellPrice}
+                      onChange={(e) => setSellPrice(e.target.value)}
+                      className="h-9 rounded-md border-sidebar-border bg-sidebar-accent/50 text-sm text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    />
+                  ) : (
+                    <div
+                      className="flex h-9 items-center rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 text-sm text-sidebar-foreground"
+                      style={{ fontFamily: "var(--font-geist-sans)" }}
+                    >
+                      {bestBuyPriceLoading
+                        ? "Loading…"
+                        : bestBuyPrice !== null
+                          ? `${bestBuyPrice.toFixed(6)} XRP`
+                          : "No offers"}
+                    </div>
+                  )}
                   <Input
                     type="text"
                     inputMode="numeric"
@@ -958,7 +1026,7 @@ export function BrowseApisView() {
                     disabled={
                       sellOrBuy === "sell"
                         ? sellLoading
-                        : buyLoading
+                        : buyLoading || bestBuyPrice === null
                     }
                     onClick={async () => {
                       const supabase = getSupabase();

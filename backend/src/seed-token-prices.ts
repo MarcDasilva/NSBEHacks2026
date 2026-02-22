@@ -10,9 +10,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const TOKEN_NAME = "ATK";
+const TOKEN_NAME = "GGK";
 const BASE_PRICE = 0.00003;
-const NUM_RECORDS = 1440 * 3; // Number of price records to generate
+const NUM_RECORDS = 500; // Number of price records to generate
 const VOLATILITY = 0.03; // 3% max change per step
 const TIME_INTERVAL_SECONDS = 60; // Time between each price point
 

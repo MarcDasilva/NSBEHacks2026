@@ -32,6 +32,13 @@ export type TokenConfig = {
 /** Default token when no provider is selected (e.g. GGK for Google). */
 const DEFAULT_PROVIDER_ID = "google";
 
+/** Reverse-map a currency code (e.g. "GGK") to all matching provider IDs (e.g. ["google"]). */
+export function getProviderIdsForCurrency(currency: string): string[] {
+  return Object.entries(TICKER_LEGEND)
+    .filter(([, cur]) => cur === currency)
+    .map(([id]) => id);
+}
+
 /**
  * Returns token config (currency + issuer) for the given API provider id.
  * Use when buying/selling so orders fill for the graph/API the user is on.

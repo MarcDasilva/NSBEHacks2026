@@ -259,8 +259,34 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
       const totalXrpCost = qty * bestOffer.pricePerUnit;
       const totalDrops = Math.ceil(totalXrpCost * 1_000_000).toString();
 
-      // Create an OfferCreate to buy tokens
+      // Step 1: Set up trust line for the token (required to receive tokens)
+      const trustSetTx: xrpl.TrustSet = {
+        TransactionType: "TrustSet",
+        Account: wallet.address,
+        LimitAmount: {
+          currency: TOKEN_CURRENCY,
+          issuer: ISSUER_ADDRESS,
+          value: "1000000000", // High limit to allow receiving tokens
+        },
+      };
+
+      const preparedTrust = await client.autofill(trustSetTx);
+      const signedTrust = wallet.sign(preparedTrust);
+      const trustResult = await client.submitAndWait(signedTrust.tx_blob);
+      const trustMeta = trustResult.result.meta as xrpl.TransactionMetadata;
+
+      // Trust line setup is idempotent - tecDUPLICATE is OK if already exists
+      if (
+        typeof trustMeta === "object" &&
+        trustMeta.TransactionResult !== "tesSUCCESS" &&
+        trustMeta.TransactionResult !== "tecDUPLICATE"
+      ) {
+        throw new Error(`Failed to set up trust line: ${trustMeta.TransactionResult}`);
+      }
+
+      // Step 2: Create an OfferCreate to buy tokens
       // Buyer offers XRP (TakerGets) and wants GGK tokens (TakerPays)
+      // Use tfImmediateOrCancel to ensure the offer fills immediately
       const offerCreateTx: xrpl.OfferCreate = {
         TransactionType: "OfferCreate",
         Account: wallet.address,
@@ -270,7 +296,7 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
           value: quantity,
           issuer: ISSUER_ADDRESS,
         }, // GGK tokens that buyer wants
-        Flags: 0,
+        Flags: xrpl.OfferCreateFlags.tfImmediateOrCancel,
       };
 
       // Prepare and sign the transaction
@@ -279,12 +305,47 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
       const result = await client.submitAndWait(signed.tx_blob);
 
       const meta = result.result.meta as xrpl.TransactionMetadata;
+      console.log("[DEBUG] OfferCreate result:", result.result);
+      console.log("[DEBUG] OfferCreate meta:", meta);
 
       if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS") {
-        // Transaction successful - now set up the proxy key and update token balance
+        // Transaction successful - now burn tokens, set up proxy key, and update token balance
+        console.log("[DEBUG] OfferCreate succeeded, attempting to burn tokens...");
 
-        // 1. Find the real API key from api_key_transactions for this token
-        // For now, we'll get the first available API key transaction
+        // Check wallet balance before burn
+        const balancesBefore = await client.request({
+          command: "account_lines",
+          account: wallet.address,
+        });
+        console.log("[DEBUG] Token balances before burn:", balancesBefore.result.lines);
+
+        // 1. Immediately burn the received tokens by sending them back to the issuer
+        const burnTx: xrpl.Payment = {
+          TransactionType: "Payment",
+          Account: wallet.address,
+          Destination: ISSUER_ADDRESS,
+          Amount: {
+            currency: TOKEN_CURRENCY,
+            value: quantity,
+            issuer: ISSUER_ADDRESS,
+          },
+        };
+
+        console.log("[DEBUG] Burn transaction:", burnTx);
+        const preparedBurn = await client.autofill(burnTx);
+        const signedBurn = wallet.sign(preparedBurn);
+        const burnResult = await client.submitAndWait(signedBurn.tx_blob);
+        const burnMeta = burnResult.result.meta as xrpl.TransactionMetadata;
+        console.log("[DEBUG] Burn result:", burnResult.result);
+
+        if (typeof burnMeta !== "object" || burnMeta.TransactionResult !== "tesSUCCESS") {
+          console.error("Failed to burn tokens:", burnMeta);
+          throw new Error(`Failed to burn tokens after purchase: ${typeof burnMeta === "object" ? burnMeta.TransactionResult : "Unknown error"}`);
+        }
+
+        console.log("[DEBUG] Tokens burned successfully");
+
+        // 2. Find the real API key from api_key_transactions for this token
         const { data: apiKeyTx } = await supabase
           .from("api_key_transactions")
           .select("api_key")
@@ -293,10 +354,10 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
 
         const realApiKey = apiKeyTx?.api_key || "no_real_key_available";
 
-        // 2. Generate a proxy key
+        // 3. Generate a proxy key
         const proxyKey = generateProxyKey();
 
-        // 3. Store the proxy key mapping
+        // 4. Store the proxy key mapping
         const { error: proxyInsertError } = await supabase
           .from("proxy_api_keys")
           .insert({
@@ -308,32 +369,47 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
           console.error("Error storing proxy key:", proxyInsertError);
         }
 
-        // 4. Update or insert user's token balance
-        // First check if user has an existing record for this token
-        const { data: existingTokens } = await supabase
+        // 5. Upsert user's token balance
+        const { data: existingTokens, error: selectError } = await supabase
           .from("user_api_tokens")
           .select("id, token_amount")
           .eq("user_id", user.id)
           .eq("token_name", TOKEN_CURRENCY)
-          .single();
+          .maybeSingle();
+
+        if (selectError) {
+          console.error("Error checking existing tokens:", selectError);
+        }
 
         if (existingTokens) {
           // Update existing record
           const newAmount = existingTokens.token_amount + qty;
-          await supabase
+          const { error: updateError } = await supabase
             .from("user_api_tokens")
             .update({
               token_amount: newAmount,
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingTokens.id);
+
+          if (updateError) {
+            console.error("Error updating user tokens:", updateError);
+          } else {
+            console.log("Updated user tokens:", { userId: user.id, newAmount });
+          }
         } else {
           // Insert new record
-          await supabase.from("user_api_tokens").insert({
+          const { error: insertError } = await supabase.from("user_api_tokens").insert({
             user_id: user.id,
             token_name: TOKEN_CURRENCY,
             token_amount: qty,
           });
+
+          if (insertError) {
+            console.error("Error inserting user tokens:", insertError);
+          } else {
+            console.log("Inserted user tokens:", { userId: user.id, tokenAmount: qty });
+          }
         }
 
         // Calculate and store the weighted average price

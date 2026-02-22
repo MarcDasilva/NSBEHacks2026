@@ -36,7 +36,7 @@ CREATE TABLE public.user_api_tokens (
     created_at TIMESTAMP WITH TIME ZONE NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NULL DEFAULT now(),
     CONSTRAINT user_api_tokens_pkey PRIMARY KEY (id),
-    CONSTRAINT user_api_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    CONSTRAINT user_api_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
 CREATE INDEX IF NOT EXISTS idx_user_api_tokens_user ON public.user_api_tokens USING btree (user_id) TABLESPACE pg_default;

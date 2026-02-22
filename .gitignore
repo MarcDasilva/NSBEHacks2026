@@ -1,1 +1,21 @@
+# Dependencies — ignore all node_modules everywhere
 node_modules/
+**/node_modules/
+
+# Build / cache
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+*.swp
+*.swo
+.DS_Store

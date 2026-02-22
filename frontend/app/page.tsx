@@ -510,7 +510,7 @@ export default function Home() {
                     key={provider.id}
                     type="button"
                     onClick={() => setActiveProvider(provider.id)}
-                    className={`${styles.sdkIcon} ${styles.sdkIconBtn}`}
+                    className={[styles.sdkIcon, styles.sdkIconBtn].join(" ")}
                     style={{
                       width: 30,
                       height: 30,

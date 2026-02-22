@@ -1,6 +1,7 @@
 "use client"
 
-import { IconCirclePlusFilled, IconMail, type Icon } from "@tabler/icons-react"
+import Link from "next/link"
+import { IconMail, IconServer, type Icon } from "@tabler/icons-react"
 
 import { Button } from '@/components/ui/button'
 import {
@@ -13,12 +14,16 @@ import {
 
 export function NavMain({
   items,
+  onBrowseApisClick,
+  onNavItemClick,
 }: {
   items: {
     title: string
     url: string
     icon?: Icon
   }[]
+  onBrowseApisClick?: () => void
+  onNavItemClick?: (title: string) => void
 }) {
   return (
     <SidebarGroup>
@@ -26,11 +31,21 @@ export function NavMain({
         <SidebarMenu>
           <SidebarMenuItem className="flex items-center gap-2">
             <SidebarMenuButton
-              tooltip="Quick Create"
+              tooltip="Browse APIs"
               className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground min-w-8 duration-200 ease-linear"
+              asChild={!!onBrowseApisClick}
             >
-              <IconCirclePlusFilled />
-              <span>Quick Create</span>
+              {onBrowseApisClick ? (
+                <button type="button" onClick={onBrowseApisClick}>
+                  <IconServer />
+                  <span>Browse APIs</span>
+                </button>
+              ) : (
+                <>
+                  <IconServer />
+                  <span>Browse APIs</span>
+                </>
+              )}
             </SidebarMenuButton>
             <Button
               size="icon"
@@ -43,14 +58,38 @@ export function NavMain({
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title}>
-                {item.icon && <item.icon />}
-                <span>{item.title}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          {items.map((item) => {
+            const useLink = !!item.url && item.url !== "#"
+            const useClick = !useLink && onNavItemClick
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  asChild={!!(useLink || useClick)}
+                >
+                  {useLink ? (
+                    <Link href={item.url}>
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </Link>
+                  ) : useClick ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavItemClick(item.title)}
+                    >
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </button>
+                  ) : (
+                    <>
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

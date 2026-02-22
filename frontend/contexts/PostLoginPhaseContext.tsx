@@ -14,7 +14,7 @@ export function usePostLoginPhase() {
   return useContext(PostLoginPhaseContext);
 }
 
-export const FADE_DURATION = 1.5;
+export const FADE_DURATION = 1.4;
 
 export function PostLoginPhaseProvider({
   children,

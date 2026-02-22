@@ -667,7 +667,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
         <div className="flex flex-col gap-4 overflow-y-auto px-4 text-sm">
           {!isMobile && (
             <>
-              <ChartContainer config={chartConfig}>
+              <ChartContainer config={chartConfig} className="min-h-[200px] min-w-0">
                 <AreaChart
                   accessibilityLayer
                   data={chartData}

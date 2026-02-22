@@ -1,29 +1,26 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   IconCamera,
   IconChartBar,
   IconChartCandle,
-  IconDashboard,
   IconDatabase,
   IconFileAi,
   IconFileDescription,
-  IconFileWord,
-  IconFolder,
   IconHelp,
-  IconInnerShadowTop,
   IconListDetails,
+  IconPlugConnected,
   IconReport,
   IconSearch,
   IconSettings,
   IconUsers,
-} from "@tabler/icons-react"
+} from "@tabler/icons-react";
 
-import { NavDocuments } from '@/components/nav-documents'
-import { NavMain } from '@/components/nav-main'
-import { NavSecondary } from '@/components/nav-secondary'
-import { NavUser } from '@/components/nav-user'
+import { NavDocuments } from "@/components/nav-documents";
+import { NavMain } from "@/components/nav-main";
+import { NavSecondary } from "@/components/nav-secondary";
+import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
   SidebarContent,
@@ -32,27 +29,27 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@/components/ui/sidebar'
+} from "@/components/ui/sidebar";
 
 const data = {
   user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
+    name: "User",
+    email: "",
+    avatar: "",
   },
   navMain: [
     {
-      title: "Dashboard",
-      url: "/dashboard",
-      icon: IconDashboard,
+      title: "Connections",
+      url: "#",
+      icon: IconPlugConnected,
     },
     {
       title: "Order Book",
-      url: "/orderbook",
+      url: "#",
       icon: IconChartCandle,
     },
     {
-      title: "Lifecycle",
+      title: "Usage",
       url: "#",
       icon: IconListDetails,
     },
@@ -60,11 +57,6 @@ const data = {
       title: "Analytics",
       url: "#",
       icon: IconChartBar,
-    },
-    {
-      title: "Projects",
-      url: "#",
-      icon: IconFolder,
     },
     {
       title: "Team",
@@ -148,27 +140,26 @@ const data = {
       url: "#",
       icon: IconReport,
     },
-    {
-      name: "Word Assistant",
-      url: "#",
-      icon: IconFileWord,
-    },
   ],
-}
+};
 
 type NavUserData = {
-  name: string
-  email: string
-  avatar: string
-}
+  name: string;
+  email: string;
+  avatar: string;
+};
 
 export function AppSidebar({
   user,
   onLogout,
+  onAccountSaved,
+  onNavigate,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
-  user: NavUserData
-  onLogout?: () => void
+  user: NavUserData;
+  onLogout?: () => void;
+  onAccountSaved?: (updates: { name: string; avatar: string }) => void;
+  onNavigate?: (view: "browse" | "dashboard" | "orderbook" | "usage") => void;
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -177,24 +168,54 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:!p-1.5"
+              className="data-[slot=sidebar-menu-button]:!p-1.5 overflow-visible [&>a]:overflow-visible [&_span]:overflow-visible"
             >
-              <a href="#">
-                <IconInnerShadowTop className="!size-5" />
-                <span className="text-base font-semibold">Acme Inc.</span>
+              <a href="#" className="flex w-full justify-start pt-2.5">
+                <span
+                  style={{
+                    fontFamily: "var(--font-geist-pixel-line)",
+                    fontSize: "1.875rem",
+                    fontWeight: 500,
+                    letterSpacing: "-0.07em",
+                    lineHeight: 1.2,
+                    color: "#fff",
+                    display: "inline-block",
+                    paddingBottom: "0.05em",
+                  }}
+                >
+                  apiXchange
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain
+          items={data.navMain}
+          onBrowseApisClick={
+            onNavigate ? () => onNavigate("browse") : undefined
+          }
+          onNavItemClick={
+            onNavigate
+              ? (title) => {
+                  if (title === "Connections") onNavigate("dashboard");
+                  if (title === "Order Book") onNavigate("orderbook");
+                  if (title === "Usage") onNavigate("usage");
+                }
+              : undefined
+          }
+        />
         <NavDocuments items={data.documents} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} onLogout={onLogout} />
+        <NavUser
+          user={user}
+          onLogout={onLogout}
+          onAccountSaved={onAccountSaved}
+        />
       </SidebarFooter>
     </Sidebar>
-  )
+  );
 }

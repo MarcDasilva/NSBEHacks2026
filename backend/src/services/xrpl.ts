@@ -174,6 +174,36 @@ export class XRPLService {
     return balance.toString();
   }
 
+  /**
+   * Issue tokens (e.g. GGK) from issuer to recipient. Uses shared connection.
+   */
+  async issueTokensToAddress(
+    issuerSecret: string,
+    recipientAddress: string,
+    amount: number,
+    currency: string = process.env.TOKEN_CURRENCY || "GGK",
+    issuerAddress: string = process.env.ISSUER_ADDRESS || ""
+  ): Promise<{ txHash: string }> {
+    await this.connect();
+    const issuerWallet = xrpl.Wallet.fromSeed(issuerSecret);
+    const paymentTx: xrpl.Payment = {
+      TransactionType: "Payment",
+      Account: issuerWallet.address,
+      Destination: recipientAddress,
+      Amount: {
+        currency,
+        value: amount.toString(),
+        issuer: issuerAddress,
+      },
+    };
+    const result = await this.client.submitAndWait(paymentTx, { wallet: issuerWallet });
+    const meta = result.result.meta as xrpl.TransactionMetadata;
+    if (typeof meta === "object" && meta.TransactionResult !== "tesSUCCESS") {
+      throw new Error(String(meta.TransactionResult));
+    }
+    return { txHash: result.result.hash };
+  }
+
   // ── Mint NFT ────────────────────────────────────────
 
   /**

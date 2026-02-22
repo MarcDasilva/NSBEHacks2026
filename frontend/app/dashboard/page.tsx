@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { getSupabase } from "@/lib/supabase/client";
 import {
@@ -9,18 +10,38 @@ import {
   FADE_DURATION,
 } from "@/contexts/PostLoginPhaseContext";
 import { AppSidebar } from "@/components/app-sidebar";
-import { ChartAreaInteractive } from "@/components/chart-area-interactive";
-import { DataTable } from "@/components/data-table";
-import { SectionCards } from "@/components/section-cards";
 import { SiteHeader } from "@/components/site-header";
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
-import { Toaster } from "@/components/ui/sonner";
-import data from "./data.json";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-const WELCOME_DURATION = 4;
+const BrowseApisView = dynamic(
+  () => import("@/components/browse-apis-view").then((m) => ({ default: m.BrowseApisView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const DashboardFlowView = dynamic(
+  () => import("@/components/dashboard-flow-view").then((m) => ({ default: m.DashboardFlowView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const OrderBookView = dynamic(
+  () => import("@/components/orderbook-view").then((m) => ({ default: m.OrderBookView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+const UsageView = dynamic(
+  () => import("@/components/usage-view").then((m) => ({ default: m.UsageView })),
+  { ssr: false, loading: () => <DashboardViewSkeleton /> }
+);
+
+function DashboardViewSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-[#1a1a1a] text-sm text-[#888]">
+      Loading…
+    </div>
+  );
+}
+
+const WELCOME_DURATION = 3.5;
 
 type UserInfo = {
   name: string;
@@ -28,8 +49,9 @@ type UserInfo = {
   avatar: string;
 };
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { phase, setPhase } = usePostLoginPhase();
   const [firstname, setFirstname] = useState<string>("");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -59,7 +81,10 @@ export default function DashboardPage() {
         "there";
       setFirstname(name);
       setUserInfo({
-        name: user?.user_metadata?.full_name || user?.user_metadata?.given_name || name,
+        name:
+          user?.user_metadata?.full_name ||
+          user?.user_metadata?.given_name ||
+          name,
         email: user?.email ?? "",
         avatar: user?.user_metadata?.avatar_url || "",
       });
@@ -124,15 +149,26 @@ export default function DashboardPage() {
 
   const showWelcome = phase === "welcome" || phase === "fading";
   const showDashboard = phase === "done" && userInfo;
+  const initialView = (searchParams.get("view") === "orderbook" ? "orderbook" : searchParams.get("view") === "usage" ? "usage" : searchParams.get("view") === "dashboard" ? "dashboard" : "browse") as "browse" | "dashboard" | "orderbook" | "usage";
+  const [mainView, setMainView] = useState<"browse" | "dashboard" | "orderbook" | "usage">(initialView);
 
-  // Fade in dashboard when it mounts (phase === "done")
+  // Keep mainView in sync with ?view= when URL changes (e.g. redirect from /orderbook)
+  useEffect(() => {
+    const view = searchParams.get("view");
+    if (view === "orderbook") setMainView("orderbook");
+    else if (view === "usage") setMainView("usage");
+    else if (view === "dashboard") setMainView("dashboard");
+    else if (view === "browse") setMainView("browse");
+  }, [searchParams]);
+
+  // Fade up dashboard when it mounts (phase === "done"), same style as landing page
   useEffect(() => {
     if (phase !== "done" || !dashboardRef.current) return;
     const el = dashboardRef.current;
     gsap.fromTo(
       el,
-      { opacity: 0 },
-      { opacity: 1, duration: FADE_DURATION, ease: "power2.inOut" },
+      { opacity: 0, y: 24 },
+      { opacity: 1, y: 0, duration: 1.4, ease: "power3.out" },
     );
   }, [phase]);
 
@@ -201,6 +237,7 @@ export default function DashboardPage() {
           }}
         >
           <SidebarProvider
+            className="bg-transparent! h-svh overflow-hidden"
             style={
               {
                 "--sidebar-width": "calc(var(--spacing) * 72)",
@@ -208,25 +245,66 @@ export default function DashboardPage() {
               } as React.CSSProperties
             }
           >
-            <AppSidebar user={userInfo} onLogout={handleSignOut} variant="inset" />
-            <SidebarInset>
-              <SiteHeader />
-              <div className="flex flex-1 flex-col">
-                <div className="@container/main flex flex-1 flex-col gap-2">
-                  <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-                    <SectionCards />
-                    <div className="px-4 lg:px-6">
-                      <ChartAreaInteractive />
-                    </div>
-                    <DataTable data={data} />
-                  </div>
+            <AppSidebar
+              user={userInfo}
+              onLogout={handleSignOut}
+              onAccountSaved={(updates) =>
+                setUserInfo((prev) =>
+                  prev
+                    ? { ...prev, name: updates.name, avatar: updates.avatar }
+                    : null,
+                )
+              }
+              onNavigate={setMainView}
+              variant="inset"
+            />
+            <SidebarInset className="bg-transparent min-h-0 flex flex-1 flex-col overflow-hidden">
+              <SiteHeader
+                title={
+                  mainView === "browse"
+                    ? "Browse APIs"
+                    : mainView === "orderbook"
+                      ? "Order Book"
+                      : mainView === "usage"
+                        ? "Usage"
+                        : "Connections"
+                }
+              />
+              {mainView === "browse" ? (
+                <BrowseApisView />
+              ) : mainView === "orderbook" ? (
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <OrderBookView />
                 </div>
-              </div>
+              ) : mainView === "usage" ? (
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <UsageView />
+                </div>
+              ) : (
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <DashboardFlowView />
+                </div>
+              )}
             </SidebarInset>
-            <Toaster />
           </SidebarProvider>
         </div>
       )}
     </>
+  );
+}
+
+function DashboardPageFallback() {
+  return (
+    <div className="flex min-h-svh w-full items-center justify-center bg-[#0d0d0d] text-sm text-[#888]">
+      Loading…
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardPageFallback />}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }

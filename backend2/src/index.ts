@@ -1,0 +1,176 @@
+import Elysia from "elysia";
+import { db } from "./database";
+import { count_api_keys, get_real_key } from "./db/queries_sql";
+import { fetch } from "bun";
+import xrpl, { Wallet } from "xrpl";
+
+const XRPL_URL = process.env.XRPL_URL || "wss://s.altnet.rippletest.net:51233";
+const ISSUER_SECRET = process.env.ISSUER_SECRET || "";
+
+const xrplClient = new xrpl.Client(XRPL_URL);
+let xrplConnected = false;
+
+async function ensureXrplConnected() {
+    if (!xrplConnected) {
+        await xrplClient.connect();
+        xrplConnected = true;
+    }
+}
+
+type ApiType = "openai" | "google";
+type TokenType = "OAK" | "GGK" | "ATK";
+
+const VALID_TOKEN_TYPES: TokenType[] = ["OAK", "GGK", "ATK"];
+
+interface ApiKeyHandler {
+    extract: (headers: Record<string, string>) => string | null;
+    transform: (realKey: string) => Record<string, string>;
+}
+
+const apiKeyHandlers: Record<ApiType, ApiKeyHandler> = {
+    openai: {
+        extract: (headers) => {
+            const auth = headers["authorization"] || headers["Authorization"];
+            if (!auth?.startsWith("Bearer ")) return null;
+            return auth.slice(7);
+    },
+        transform: (realKey) => ({
+            Authorization: `Bearer ${realKey}`,
+        }),
+    },
+    google: {
+        extract: (headers) => {
+            return headers["x-goog-api-key"] || null;
+        },
+        transform: (realKey) => ({
+            "x-goog-api-key": realKey,
+        }),
+    },
+};
+
+const FORBIDDEN_HEADERS = [
+    "host", "connection", "content-length", "accept-encoding", "accept-language", "origin", "referer", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-dest", "sec-fetch-user", "upgrade-insecure-requests", "user-agent", "cookie", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"
+];
+
+const app = new Elysia()
+    .get("/", () => "Hello Elysia")
+    .get("/proxy-keys/count", async () => {
+        const result = await count_api_keys(db);
+        return {
+            count: Number(result?.count ?? 0)
+        };
+    })
+    // Proxy route: forwards requests to a target API
+    .all("/proxy", async ({ request, query, body, headers }) => {
+        const target = query.target;
+        const apiType = (query as Record<string, string>).api_type as ApiType | undefined;
+
+        if (!target) {
+            return { error: "Missing 'target' query parameter" };
+        }
+        if (!apiType) {
+            return { error: "Missing 'api_type' query parameter" };
+        }
+
+        const handler = apiKeyHandlers[apiType];
+        if (!handler) {
+            return { error: `Unsupported api_type: ${apiType}` };
+        }
+
+        try {
+            // Filter out forbidden/problematic headers
+            let fetchHeaders: Record<string, string> = {};
+            for (const [key, value] of Object.entries(headers)) {
+                if (!FORBIDDEN_HEADERS.includes(key.toLowerCase())) {
+                    fetchHeaders[key] = value as string;
+                }
+            }
+
+            // Extract proxy key and convert to real key
+            const proxyKey = handler.extract(fetchHeaders);
+            if (!proxyKey) {
+                return { error: "Could not extract API key from request" };
+            }
+
+            const result = await get_real_key(db, { proxyKey });
+            if (!result) {
+                return { error: "Invalid proxy key" };
+            }
+
+            // Remove the original API key header and apply the real key
+            delete fetchHeaders["authorization"];
+            delete fetchHeaders["Authorization"];
+            delete fetchHeaders["x-goog-api-key"];
+            const realKeyHeaders = handler.transform(result.realKey);
+            Object.assign(fetchHeaders, realKeyHeaders);
+            // Only attach body for relevant methods
+            if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && body) {
+                if (!fetchHeaders["content-type"]) {
+                    fetchHeaders["content-type"] = "application/json";
+                }
+            }
+            const fetchOptions: any = {
+                method: request.method,
+                headers: fetchHeaders,
+            };
+            if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && body) {
+                fetchOptions.body = typeof body === "string" ? body : JSON.stringify(body);
+            }
+            // Forward request
+            const resp = await fetch(target, fetchOptions)
+            // Forward response status, headers, and body
+            return await resp.json();
+        } catch (err: any) {
+            return { error: err.message || "Proxy error" };
+        }
+    })
+    .post("/tokens/issue", async ({ body }) => {
+        const { address, amount, token_type } = body as { address: string; amount: string; token_type: TokenType };
+
+        if (!address || !amount || !token_type) {
+            return { error: "Missing 'address', 'amount', or 'token_type' in request body" };
+        }
+
+        if (!VALID_TOKEN_TYPES.includes(token_type)) {
+            return { error: `Invalid token_type. Must be one of: ${VALID_TOKEN_TYPES.join(", ")}` };
+        }
+
+        if (!ISSUER_SECRET) {
+            return { error: "ISSUER_SECRET not configured" };
+        }
+
+        try {
+            await ensureXrplConnected();
+
+            const issuerWallet = Wallet.fromSeed(ISSUER_SECRET);
+
+            const payment: xrpl.Payment = {
+                TransactionType: "Payment",
+                Account: issuerWallet.address,
+                Destination: address,
+                Amount: {
+                    currency: token_type,
+                    value: amount,
+                    issuer: issuerWallet.address,
+                },
+            };
+
+            const tx = await xrplClient.submitAndWait(payment, { wallet: issuerWallet });
+
+            return {
+                success: true,
+                hash: tx.result.hash,
+                issuer: issuerWallet.address,
+                destination: address,
+                amount,
+                token_type,
+            };
+        } catch (err: any) {
+            return { error: err.message || "Failed to issue AIK tokens" };
+        }
+    })
+    .listen(3000);
+
+console.log(
+    `🦊 Elysia is running at http://${app.server?.hostname}:${app.server?.port}`
+);

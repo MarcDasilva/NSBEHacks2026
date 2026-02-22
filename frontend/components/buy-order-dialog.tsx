@@ -92,15 +92,18 @@ function generateProxyKey(): string {
 /**
  * Fetches the best sell offers from the order book
  */
-async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
-  console.log("[DEBUG] TOKEN_CURRENCY:", TOKEN_CURRENCY);
-  console.log("[DEBUG] ISSUER_ADDRESS:", ISSUER_ADDRESS);
-  // Query for sell offers: taker gets GGK tokens and pays XRP
+async function fetchBestSellOffers(
+  client: xrpl.Client,
+  tokenConfig: TokenConfig,
+): Promise<SellOffer[]> {
+  console.log("[DEBUG] tokenConfig.currency:", tokenConfig.currency);
+  console.log("[DEBUG] tokenConfig.issuer:", tokenConfig.issuer);
+  // Query for sell offers: taker gets tokens and pays XRP
   const response = await client.request({
     command: "book_offers",
     taker_gets: {
-      currency: TOKEN_CURRENCY,
-      issuer: ISSUER_ADDRESS,
+      currency: tokenConfig.currency,
+      issuer: tokenConfig.issuer,
     },
     taker_pays: { currency: "XRP" },
     limit: 50,
@@ -439,7 +442,8 @@ export function BuyOrderDialog({
     burnHash: string;
   } | null>(null);
   const [evmRecording, setEvmRecording] = useState(false);
-  const [evmRecordResult, setEvmRecordResult] = useState<RecordBurnOnEVMResult | null>(null);
+  const [evmRecordResult, setEvmRecordResult] =
+    useState<RecordBurnOnEVMResult | null>(null);
 
   // Fetch best offer and wallets when dialog opens
   useEffect(() => {
@@ -602,7 +606,7 @@ export function BuyOrderDialog({
         {step === "form" && (
           <>
             <DialogHeader>
-              <DialogTitle>Buy {TOKEN_CURRENCY} Tokens</DialogTitle>
+              <DialogTitle>Buy {tokenConfig.currency} Tokens</DialogTitle>
               <DialogDescription>
                 Purchase tokens from the XRP Ledger DEX and get a proxy API key.
               </DialogDescription>
@@ -623,10 +627,12 @@ export function BuyOrderDialog({
                 ) : bestOffer ? (
                   <>
                     <p className="text-sm text-muted-foreground">
-                      Best price: {bestOffer.pricePerUnit.toFixed(8)} XRP per token
+                      Best price: {bestOffer.pricePerUnit.toFixed(8)} XRP per
+                      token
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Available: {totalAvailable.toLocaleString()} tokens (order fills across multiple offers)
+                      Available: {totalAvailable.toLocaleString()} tokens (order
+                      fills across multiple offers)
                     </p>
                   </>
                 ) : (
@@ -660,7 +666,7 @@ export function BuyOrderDialog({
 
               <div className="grid gap-2">
                 <Label htmlFor="buyQuantity">
-                  Quantity ({TOKEN_CURRENCY} tokens)
+                  Quantity ({tokenConfig.currency} tokens)
                 </Label>
                 <Input
                   id="buyQuantity"
@@ -683,7 +689,8 @@ export function BuyOrderDialog({
                 <div className="rounded-md bg-green-500/10 p-3">
                   <p className="text-sm font-medium">Order Summary</p>
                   <p className="text-sm text-muted-foreground">
-                    Buying {quantity} {TOKEN_CURRENCY} for {estimatedCost()} XRP
+                    Buying {quantity} {tokenConfig.currency} for{" "}
+                    {estimatedCost()} XRP
                   </p>
                 </div>
               )}
@@ -717,7 +724,9 @@ export function BuyOrderDialog({
               </Button>
               <Button
                 onClick={handleSubmit}
-                disabled={isLoading || allOffers.length === 0 || !walletId?.trim()}
+                disabled={
+                  isLoading || allOffers.length === 0 || !walletId?.trim()
+                }
                 className="bg-green-600 hover:bg-green-700"
               >
                 {isLoading ? "Processing..." : "Buy Tokens"}
@@ -742,7 +751,8 @@ export function BuyOrderDialog({
                   Transaction Successful
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Purchased {txResult.tokensReceived} {TOKEN_CURRENCY} tokens
+                  Purchased {txResult.tokensReceived} {tokenConfig.currency}{" "}
+                  tokens
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Paid: {txResult.xrpPaid.toFixed(6)} XRP
@@ -770,21 +780,29 @@ export function BuyOrderDialog({
 
               {/* Optional: record burn on XRPL EVM for on-chain transparency */}
               <div className="grid gap-2 rounded-md border border-muted p-3">
-                <p className="text-sm font-medium">Record burn on-chain (XRPL EVM)</p>
+                <p className="text-sm font-medium">
+                  Record burn on-chain (XRPL EVM)
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Record this burn on the XRPL EVM sidechain for transparency. Requires MetaMask on XRPL EVM (you pay gas).
+                  Record this burn on the XRPL EVM sidechain for transparency.
+                  Requires MetaMask on XRPL EVM (you pay gas).
                 </p>
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  disabled={evmRecording || !process.env.NEXT_PUBLIC_BURN_REGISTRY_ADDRESS}
+                  disabled={
+                    evmRecording ||
+                    !process.env.NEXT_PUBLIC_BURN_REGISTRY_ADDRESS
+                  }
                   onClick={handleRecordBurnOnEVM}
                 >
                   {evmRecording ? "Recording…" : "Record burn on XRPL EVM"}
                 </Button>
                 {evmRecordResult && (
-                  <p className={`text-xs ${evmRecordResult.success ? "text-green-600" : "text-destructive"}`}>
+                  <p
+                    className={`text-xs ${evmRecordResult.success ? "text-green-600" : "text-destructive"}`}
+                  >
                     {evmRecordResult.success
                       ? `Recorded. Tx: ${evmRecordResult.txHash.slice(0, 10)}…`
                       : evmRecordResult.error}

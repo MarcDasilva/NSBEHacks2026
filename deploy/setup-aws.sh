@@ -1,23 +1,46 @@
 #!/usr/bin/env bash
-# Run this script ON your AWS instance (Ubuntu) from the repo root.
+# Run this script ON your AWS instance (Ubuntu or Amazon Linux) from the repo root.
 # Usage: ./deploy/setup-aws.sh
-# Prereqs: repo is at /home/ubuntu/NSBEHacks2026-1 (or set APP_ROOT).
+# Prereqs: repo at e.g. /home/ubuntu/NSBEHacks2026-1 or /home/ec2-user/NSBEHacks2026 (set APP_ROOT if needed).
 
 set -e
 
 APP_ROOT="${APP_ROOT:-$(pwd)}"
+RUN_USER="${RUN_USER:-$(whoami)}"
 if [[ ! -d "$APP_ROOT/backend" || ! -d "$APP_ROOT/proxy-server" ]]; then
   echo "Error: Run from repo root (or set APP_ROOT). Not found: $APP_ROOT/backend or $APP_ROOT/proxy-server"
   exit 1
 fi
 
-echo "==> Using app root: $APP_ROOT"
+echo "==> Using app root: $APP_ROOT, user: $RUN_USER"
+
+# Detect OS for Node.js install (Debian/Ubuntu vs Amazon Linux / RHEL / Fedora)
+if command -v apt-get &>/dev/null; then
+  OS_FAMILY="debian"
+elif command -v dnf &>/dev/null; then
+  OS_FAMILY="rhel"
+elif command -v yum &>/dev/null; then
+  OS_FAMILY="rhel"
+else
+  echo "Error: Unsupported OS (no apt-get, dnf, or yum). Install Node.js and Bun manually."
+  exit 1
+fi
 
 # --- Node.js (for backend) ---
 if ! command -v node &>/dev/null; then
   echo "==> Installing Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  else
+    # Amazon Linux, RHEL, CentOS, Fedora
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+    if command -v dnf &>/dev/null; then
+      sudo dnf install -y nodejs
+    else
+      sudo yum install -y nodejs
+    fi
+  fi
 fi
 echo "==> Node $(node -v)"
 
@@ -67,7 +90,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
+User=$RUN_USER
 WorkingDirectory=$APP_ROOT/backend
 Environment=NODE_ENV=production
 EnvironmentFile=$APP_ROOT/backend/.env
@@ -88,7 +111,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
+User=$RUN_USER
 WorkingDirectory=$APP_ROOT/proxy-server
 Environment=NODE_ENV=production
 EnvironmentFile=$APP_ROOT/proxy-server/.env

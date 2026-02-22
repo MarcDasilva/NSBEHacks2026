@@ -427,10 +427,58 @@ export function BrowseApisView() {
     };
   }, [selectedTicker]);
 
+  // Fetch live prices for all tickers - runs independently of auth
+  const fetchLivePrices = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return false;
+
+    try {
+      // Fetch recent prices for each token individually to avoid the 1000 row limit issue
+      const tokenNames = Object.values(TICKER_LEGEND);
+      const next: Record<string, { last: number; chg: number; chgPct: number }> = {};
+
+      await Promise.all(
+        tokenNames.map(async (tokenName) => {
+          const { data: priceData, error } = await supabase
+            .from("token_prices")
+            .select("price, price_time")
+            .eq("token_name", tokenName)
+            .order("price_time", { ascending: true });
+
+          if (error || !priceData?.length) return;
+
+          const points = priceData.map((r) => ({
+            timeMs: new Date(r.price_time ?? 0).getTime(),
+            price: Number(r.price ?? 0),
+          })).filter((p) => !Number.isNaN(p.timeMs));
+
+          const id = ID_BY_TOKEN[tokenName];
+          if (!id) return;
+
+          const computed = computeLastChgFromData(points);
+          if (computed) {
+            next[id] = computed;
+          }
+        })
+      );
+
+      if (Object.keys(next).length > 0) {
+        setLivePrices((prev) => ({ ...prev, ...next }));
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error("[fetchLivePrices] Exception:", err);
+      return false;
+    }
+  }, []);
+
   const loadFavourites = useCallback(async () => {
     const supabase = getSupabase();
     if (!supabase) {
       setTickers(ALL_TICKERS);
+      await fetchLivePrices();
       setLoaded(true);
       return;
     }
@@ -439,6 +487,7 @@ export function BrowseApisView() {
     } = await supabase.auth.getUser();
     if (!authUser?.id) {
       setTickers(ALL_TICKERS);
+      await fetchLivePrices();
       setLoaded(true);
       return;
     }
@@ -468,43 +517,76 @@ export function BrowseApisView() {
     }
     setFavourites(favs);
     setTickers(rest);
+
+    await fetchLivePrices();
     setLoaded(true);
-  }, []);
+  }, [fetchLivePrices]);
 
   useEffect(() => {
     loadFavourites();
   }, [loadFavourites]);
 
-  // Fetch last 2 days of token_prices to build live last/chg/chgPct (chg vs 24h ago) for all tickers
+  // Fetch prices on mount with retry - ensures prices load even if initial fetch fails
   useEffect(() => {
+    let cancelled = false;
+    let retryCount = 0;
+    const maxRetries = 5;
+    const retryDelay = 300;
+
+    const tryFetch = async () => {
+      if (cancelled) return;
+      const success = await fetchLivePrices();
+      if (!success && retryCount < maxRetries && !cancelled) {
+        retryCount++;
+        setTimeout(tryFetch, retryDelay);
+      }
+    };
+
+    // Small delay to ensure component is mounted and supabase is ready
+    setTimeout(tryFetch, 100);
+
+    return () => { cancelled = true; };
+  }, [fetchLivePrices]);
+
+  // Realtime: subscribe to ALL token_prices changes so table updates live
+  useEffect(() => {
+    if (!loaded) return;
     const supabase = getSupabase();
     if (!supabase) return;
-    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-    supabase
-      .from("token_prices")
-      .select("token_name, price, price_time")
-      .gte("price_time", twoDaysAgo)
-      .order("price_time", { ascending: true })
-      .then(({ data, error }) => {
-        if (error || !data?.length) return;
-        const byToken: Record<string, { timeMs: number; price: number }[]> = {};
-        for (const r of data) {
-          const name = r.token_name ?? "";
-          if (!byToken[name]) byToken[name] = [];
-          const timeMs = new Date(r.price_time ?? 0).getTime();
-          if (!Number.isNaN(timeMs))
-            byToken[name].push({ timeMs, price: Number(r.price ?? 0) });
+    const channel = supabase
+      .channel("token_prices:all")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "token_prices",
+        },
+        (payload) => {
+          const row = payload.new as { token_name?: string; price?: unknown; price_time?: string } | null;
+          if (!row?.price_time || !row?.token_name) return;
+          const tokenName = row.token_name;
+          const tickerId = ID_BY_TOKEN[tokenName];
+          if (!tickerId) return;
+          const price = Number(row.price ?? 0);
+          // Update livePrices with the new price (simple update - just use new price as last)
+          setLivePrices((prev) => {
+            const existing = prev[tickerId];
+            const oldLast = existing?.last ?? price;
+            const chg = price - oldLast;
+            const chgPct = oldLast !== 0 ? (chg / oldLast) * 100 : 0;
+            return {
+              ...prev,
+              [tickerId]: { last: price, chg, chgPct },
+            };
+          });
         }
-        const next: Record<string, { last: number; chg: number; chgPct: number }> = {};
-        for (const [tokenName, points] of Object.entries(byToken)) {
-          const id = ID_BY_TOKEN[tokenName];
-          if (!id) continue;
-          const computed = computeLastChgFromData(points);
-          if (computed) next[id] = computed;
-        }
-        setLivePrices((prev) => ({ ...prev, ...next }));
-      });
-  }, []);
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loaded]);
 
   const addToFavourites = async (row: TickerRow) => {
     const supabase = getSupabase();
@@ -1101,7 +1183,7 @@ export function BrowseApisView() {
                         onClick={() => setSelectedTicker(row)}
                         onMouseEnter={() => setHoveredFavId(row.id)}
                         onMouseLeave={() => setHoveredFavId(null)}
-                        className={`cursor-pointer ${isHovered ? "bg-sidebar-accent" : ""}`}
+                        className={`cursor-pointer h-14 ${isHovered ? "bg-sidebar-accent" : ""}`}
                       >
                         <td className="py-3 pl-6">
                           <div className="flex items-center gap-2">
@@ -1111,7 +1193,7 @@ export function BrowseApisView() {
                                 e.stopPropagation();
                                 removeFromFavourites(row);
                               }}
-                              className="flex shrink-0 text-sidebar-foreground/70 hover:text-destructive"
+                              className="flex h-5 w-5 shrink-0 items-center justify-center text-sidebar-foreground/70 hover:text-destructive"
                             >
                               <IconFlagFilled className="size-4 text-destructive" />
                             </button>
@@ -1156,18 +1238,16 @@ export function BrowseApisView() {
                           </AnimatedValue>
                         </td>
                         <td className="w-8 py-3 pr-4">
-                          {isHovered ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeFromFavourites(row);
-                              }}
-                              className="flex h-8 w-8 items-center justify-center rounded text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-destructive"
-                            >
-                              <IconTrash className="size-4" />
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFromFavourites(row);
+                            }}
+                            className={`flex h-5 w-5 items-center justify-center rounded text-sidebar-foreground/70 hover:text-destructive ${isHovered ? "opacity-100" : "opacity-0"}`}
+                          >
+                            <IconTrash className="size-4" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -1237,7 +1317,7 @@ export function BrowseApisView() {
                       onClick={() => setSelectedTicker(row)}
                       onMouseEnter={() => setHoveredId(row.id)}
                       onMouseLeave={() => setHoveredId(null)}
-                      className={`cursor-pointer ${isHovered ? "bg-sidebar-accent" : ""}`}
+                      className={`cursor-pointer h-14 ${isHovered ? "bg-sidebar-accent" : ""}`}
                     >
                       <td className="py-3 pl-6">
                         <div className="flex items-center gap-2">
@@ -1247,7 +1327,7 @@ export function BrowseApisView() {
                               e.stopPropagation();
                               addToFavourites(row);
                             }}
-                            className="flex shrink-0 text-sidebar-foreground/70 hover:text-destructive"
+                            className="flex h-5 w-5 shrink-0 items-center justify-center text-sidebar-foreground/70 hover:text-destructive"
                           >
                             <IconFlagFilled className="size-4 opacity-30" />
                           </button>
@@ -1292,18 +1372,16 @@ export function BrowseApisView() {
                         </AnimatedValue>
                       </td>
                       <td className="w-8 py-3 pr-4">
-                        {isHovered ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeFromBrowseList(row.id);
-                            }}
-                            className="flex h-8 w-8 items-center justify-center rounded text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-destructive"
-                          >
-                            <IconTrash className="size-4" />
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromBrowseList(row.id);
+                          }}
+                          className={`flex h-5 w-5 items-center justify-center rounded text-sidebar-foreground/70 hover:text-destructive ${isHovered ? "opacity-100" : "opacity-0"}`}
+                        >
+                          <IconTrash className="size-4" />
+                        </button>
                       </td>
                     </tr>
                   );

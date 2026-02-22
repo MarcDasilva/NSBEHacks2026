@@ -175,37 +175,63 @@ function tokenizePythonLine(line: string): Token[] {
   return tokens;
 }
 
-const GEMINI_CODE = `import google.generativeai as genai
+const GEMINI_CODE = `const proxyUrl = "http://localhost:3000/proxy";
+const targetUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
+const apiKey = "<your api key>"
+const payload = {contents: [parts: [{text: "Explain how AI works in a few words"}]}]};
 
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
+const url = \`\${proxyUrl}?api_type=google&target=\${encodeURIComponent(targetUrl)}\`;
 
-model = genai.GenerativeModel("gemini-1.5-pro")
+const response = await fetch(url, {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-goog-api-key": apiKey
+    },
+    body: JSON.stringify(payload)
+});`;
 
-response = model.generate_content(
-    "Explain how decentralized marketplaces work in simple terms.")
+const OPENAI_CODE = `const url = "https://api.openai.com/v1/responses";
+const apiKey = "<your proxy key>";
+const payload = {
+    model: "gpt-5-nano",
+    input: "write a haiku about ai",
+    store: true
+};
 
-print(response.text)`;
+const response = await fetch("http:localhost:3000/proxy?api_type=openai&target=" + encodeURI(url), {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json",
+        "Authorization": \`Bearer \${apiKey}\`,
+        "Accept": "application/json"
+    },
+    body: JSON.stringify(payload)
+});`;
 
-const OPENAI_CODE = `from openai import OpenAI
+const ANTHROPIC_CODE = `const url = "https://api.anthropic.com/v1/messages";
+const apiKey = "<your proxy key>";
 
-client = OpenAI(api_key="YOUR_OPENAI_API_KEY")
+const payload = {
+    model: "claude-3-haiku-20240307",
+    max_tokens: 100,
+    messages: [{ role: "user", content: "write a haiku about ai" }]
+};
 
-response = client.chat.completions.create(
-    model="gpt-4o-mini",  # or gpt-4.1
-    messages=[
-        {"role": "user", "content": "Explain how decentralized marketplaces work in simple terms."}],)
-
-print(response.choices[0].message.content)`;
-
-const ANTHROPIC_CODE = `import anthropic
-
-client = anthropic.Anthropic(api_key="YOUR_ANTHROPIC_API_KEY")
-
-response = client.messages.create(
-    model="claude-3-haiku-20240307",  # or claude-3-sonnet
-    messages=[ {"role": "user", "content": "Explain how decentralized marketplaces work in simple terms."}],)
-
-print(response.content[0].text)`;
+const response = await fetch(
+    "http://localhost:3000/proxy?api_type=anthropic&target=" + encodeURIComponent(url),
+    {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Accept": "application/json"
+        },
+        body: JSON.stringify(payload)
+    }
+);`;
 
 const PROVIDERS = [
   { id: "gemini" as const, logo: "/gemini-color.png", code: GEMINI_CODE },

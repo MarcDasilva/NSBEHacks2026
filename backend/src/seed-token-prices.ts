@@ -10,11 +10,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const TOKEN_NAME = "GGK";
-const BASE_PRICE = 0.008333333333333333;
-const NUM_RECORDS = 100; // Number of price records to generate
-const VOLATILITY = 0.05; // 5% max change per step
-const TIME_INTERVAL_SECONDS = 10; // Time between each price point
+const TOKEN_NAME = "ATK";
+const BASE_PRICE = 0.00003;
+const NUM_RECORDS = 1440 * 3; // Number of price records to generate
+const VOLATILITY = 0.03; // 3% max change per step
+const TIME_INTERVAL_SECONDS = 60; // Time between each price point
 
 async function seedTokenPrices() {
   const supabase = getSupabase();
@@ -39,7 +39,7 @@ async function seedTokenPrices() {
     currentPrice = currentPrice * (1 + changePercent);
 
     // Keep price within reasonable bounds (0.005 to 0.02)
-    currentPrice = Math.max(0.005, Math.min(0.02, currentPrice));
+    currentPrice = Math.max(0.000001, Math.min(0.00003, currentPrice));
 
     records.push({
       token_name: TOKEN_NAME,

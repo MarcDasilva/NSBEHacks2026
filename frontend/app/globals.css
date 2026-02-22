@@ -151,3 +151,18 @@
   color: #fff !important;
   fill: #fff !important;
 }
+
+/* React Flow edge lines — brighter on dark canvas */
+.react-flow__edge-path,
+.react-flow__edge path {
+  stroke: #888 !important;
+  stroke-width: 2;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge.selected path {
+  stroke: #aaa !important;
+}
+.react-flow.dark .react-flow__edge-path,
+.react-flow.dark .react-flow__edge path {
+  stroke: #888 !important;
+}

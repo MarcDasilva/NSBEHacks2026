@@ -8,6 +8,7 @@ import {
   GeistPixelLine,
 } from "geist/font/pixel";
 import { PostLoginPhaseProvider } from "@/contexts/PostLoginPhaseContext";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata = {
@@ -39,6 +40,7 @@ export default function RootLayout({
       >
         <PostLoginPhaseProvider>
           <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
+          <Toaster position="bottom-right" />
         </PostLoginPhaseProvider>
       </body>
     </html>

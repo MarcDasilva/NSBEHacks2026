@@ -95,68 +95,32 @@ router.post("/issue-tokens", async (req: Request, res: Response) => {
     }
 
     const service = getXRPLService();
-    await service.connect();
+    const { txHash } = await service.issueTokensToAddress(
+      ISSUER_SECRET,
+      recipientAddress,
+      parsedAmount,
+      TOKEN_CURRENCY,
+      ISSUER_ADDRESS
+    );
 
-    // Create issuer wallet from secret
-    const issuerWallet = xrpl.Wallet.fromSeed(ISSUER_SECRET);
-
-    // First, check if recipient has a trust line set up for this token
-    // If not, they need to set one up first
-    const client = new xrpl.Client(process.env.XRPL_NETWORK || "wss://s.altnet.rippletest.net:51233");
-    await client.connect();
-
-    try {
-      // Create the Payment transaction to send tokens
-      const paymentTx: xrpl.Payment = {
-        TransactionType: "Payment",
-        Account: issuerWallet.address,
-        Destination: recipientAddress,
-        Amount: {
-          currency: TOKEN_CURRENCY,
-          value: parsedAmount.toString(),
-          issuer: ISSUER_ADDRESS,
-        },
-      };
-
-      // Prepare and sign the transaction
-      const prepared = await client.autofill(paymentTx);
-      const signed = issuerWallet.sign(prepared);
-      const result = await client.submitAndWait(signed.tx_blob);
-
-      const meta = result.result.meta as xrpl.TransactionMetadata;
-
-      if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS") {
-        res.status(200).json({
-          success: true,
-          txHash: result.result.hash,
-          amount: parsedAmount,
-          currency: TOKEN_CURRENCY,
-          recipient: recipientAddress,
-        });
-      } else {
-        const errorResult =
-          typeof meta === "object" ? meta.TransactionResult : "Unknown error";
-
-        // Check for common errors
-        if (errorResult === "tecPATH_DRY") {
-          res.status(400).json({
-            error: "Recipient needs to set up a trust line for this token first",
-            code: errorResult,
-          });
-          return;
-        }
-
-        res.status(400).json({
-          error: `Transaction failed: ${errorResult}`,
-          code: errorResult,
-        });
-      }
-    } finally {
-      await client.disconnect();
-    }
+    res.status(200).json({
+      success: true,
+      txHash,
+      amount: parsedAmount,
+      currency: TOKEN_CURRENCY,
+      recipient: recipientAddress,
+    });
   } catch (error: any) {
-    console.error("Error issuing tokens:", error.message);
-    res.status(500).json({ error: error.message || "Failed to issue tokens" });
+    console.error("Error issuing tokens:", error?.message || error);
+    const errorResult = error?.message || "Unknown error";
+    if (errorResult === "tecPATH_DRY") {
+      res.status(400).json({
+        error: "Recipient needs to set up a trust line for this token first",
+        code: errorResult,
+      });
+      return;
+    }
+    res.status(500).json({ error: error?.message || "Failed to issue tokens" });
   }
 });
 

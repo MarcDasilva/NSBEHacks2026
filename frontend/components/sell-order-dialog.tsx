@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import * as xrpl from "xrpl";
+import { toast } from "sonner";
 import { getSupabase } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
     Dialog,
     DialogContent,
@@ -80,8 +82,252 @@ async function calculateWeightedAveragePrice(client: xrpl.Client): Promise<numbe
     }
 }
 
+/**
+ * Returns true if the given wallet address has an API Provider (or Proxy Key) node connected to it
+ * in the user's saved connection graph, and that node's apiKey or proxyKey matches the given apiKey.
+ */
+async function isApiKeyConnectedToWallet(
+    supabase: SupabaseClient,
+    userId: string,
+    walletAddress: string,
+    apiKey: string
+): Promise<boolean> {
+    const trimmedKey = apiKey.trim();
+    if (!trimmedKey) return false;
+
+    // 1) Resolve wallet_id for this address: fetch user wallets and derive address from secret
+    const { data: walletRows, error: walletsError } = await supabase
+        .from("wallets")
+        .select("wallet_id, wallet_secret")
+        .eq("user_id", userId);
+
+    if (walletsError || !walletRows?.length) return false;
+
+    let matchedWalletId: string | null = null;
+    for (const row of walletRows) {
+        const sec = row.wallet_secret;
+        if (!sec) continue;
+        try {
+            const w = xrpl.Wallet.fromSeed(sec);
+            if (w.address === walletAddress) {
+                matchedWalletId = row.wallet_id ?? null;
+                break;
+            }
+        } catch {
+            continue;
+        }
+    }
+    if (!matchedWalletId) return false;
+
+    // 2) Load latest connection graph
+    const { data: graphRow, error: graphError } = await supabase
+        .from("user_connection_graphs")
+        .select("nodes, edges")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (graphError || !graphRow) return false;
+    const nodes = Array.isArray(graphRow.nodes) ? graphRow.nodes as Record<string, unknown>[] : [];
+    const edges = Array.isArray(graphRow.edges) ? graphRow.edges as { source: string; target: string }[] : [];
+
+    // 3) Find wallet node ids where data.wallet === matchedWalletId
+    const walletNodeIds = new Set<string>();
+    for (const n of nodes) {
+        if (n.type !== "wallet") continue;
+        const data = n.data as Record<string, unknown> | undefined;
+        const w = data?.wallet;
+        if (String(w) === matchedWalletId && typeof n.id === "string") walletNodeIds.add(n.id);
+    }
+    if (walletNodeIds.size === 0) return false;
+
+    // 4) Find node ids connected to those wallet nodes (apiProvider or proxyKey)
+    const connectedNodeIds = new Set<string>();
+    for (const e of edges) {
+        const src = e.source;
+        const tgt = e.target;
+        if (walletNodeIds.has(src)) connectedNodeIds.add(tgt);
+        if (walletNodeIds.has(tgt)) connectedNodeIds.add(src);
+    }
+
+    // 5) Collect apiKey and proxyKey from those nodes; check if entered key matches
+    for (const n of nodes) {
+        if (!connectedNodeIds.has(String(n.id))) continue;
+        const typ = n.type as string;
+        if (typ !== "apiProvider" && typ !== "proxyKey") continue;
+        const data = n.data as Record<string, unknown> | undefined;
+        const key = (data?.apiKey ?? data?.proxyKey) as string | undefined;
+        if (typeof key === "string" && key.trim() === trimmedKey) return true;
+    }
+    return false;
+}
+
+/**
+ * Returns the API key (or proxy key) from the first API Provider / Proxy Key node connected to
+ * the given wallet_id in the user's saved connection graph. Used for inline sell (no dialog).
+ */
+export async function getApiKeyForWallet(
+    supabase: SupabaseClient,
+    userId: string,
+    walletId: string
+): Promise<string | null> {
+    if (!walletId?.trim()) return null;
+
+    const { data: graphRow, error: graphError } = await supabase
+        .from("user_connection_graphs")
+        .select("nodes, edges")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (graphError || !graphRow) return null;
+    const nodes = Array.isArray(graphRow.nodes) ? graphRow.nodes as Record<string, unknown>[] : [];
+    const edges = Array.isArray(graphRow.edges) ? graphRow.edges as { source: string; target: string }[] : [];
+
+    const walletNodeIds = new Set<string>();
+    for (const n of nodes) {
+        if (n.type !== "wallet") continue;
+        const data = n.data as Record<string, unknown> | undefined;
+        if (String(data?.wallet) === String(walletId) && typeof n.id === "string") walletNodeIds.add(n.id);
+    }
+    if (walletNodeIds.size === 0) return null;
+
+    const connectedNodeIds = new Set<string>();
+    for (const e of edges) {
+        if (walletNodeIds.has(e.source)) connectedNodeIds.add(e.target);
+        if (walletNodeIds.has(e.target)) connectedNodeIds.add(e.source);
+    }
+
+    for (const n of nodes) {
+        if (!connectedNodeIds.has(String(n.id))) continue;
+        const typ = n.type as string;
+        if (typ !== "apiProvider" && typ !== "proxyKey") continue;
+        const data = n.data as Record<string, unknown> | undefined;
+        const key = (data?.apiKey ?? data?.proxyKey) as string | undefined;
+        if (typeof key === "string" && key.trim()) return key.trim();
+    }
+    return null;
+}
+
+/** Runs the full sell flow (trust line, issue tokens, create offer, store). Throws on error. */
+export async function submitSellOrder(
+    supabase: SupabaseClient,
+    userId: string,
+    params: { apiKey: string; quantity: string; pricePerUnit: string; secret: string }
+): Promise<{ hash: string; transactionId: string }> {
+    const { apiKey, quantity, pricePerUnit, secret } = params;
+    const qty = parseFloat(quantity);
+    const price = parseFloat(pricePerUnit);
+    if (isNaN(qty) || qty <= 0 || isNaN(price) || price <= 0) {
+        throw new Error("Invalid quantity or price");
+    }
+    const totalXrp = qty * price;
+
+    let wallet: xrpl.Wallet;
+    try {
+        wallet = xrpl.Wallet.fromSeed(secret.trim());
+    } catch {
+        throw new Error("Invalid wallet secret");
+    }
+
+    const allowed = await isApiKeyConnectedToWallet(supabase, userId, wallet.address, apiKey.trim());
+    if (!allowed) {
+        throw new Error("You must have an API provider connected to that wallet to sell.");
+    }
+
+    const client = new xrpl.Client("wss://s.altnet.rippletest.net:51233");
+    await client.connect();
+
+    try {
+        const trustSetTx: xrpl.TrustSet = {
+            TransactionType: "TrustSet",
+            Account: wallet.address,
+            LimitAmount: {
+                currency: TOKEN_CURRENCY,
+                issuer: ISSUER_ADDRESS,
+                value: "1000000000",
+            },
+        };
+        const preparedTrust = await client.autofill(trustSetTx);
+        const signedTrust = wallet.sign(preparedTrust);
+        const trustResult = await client.submitAndWait(signedTrust.tx_blob);
+        const trustMeta = trustResult.result.meta as xrpl.TransactionMetadata;
+        if (
+            typeof trustMeta === "object" &&
+            trustMeta.TransactionResult !== "tesSUCCESS" &&
+            trustMeta.TransactionResult !== "tecDUPLICATE"
+        ) {
+            throw new Error(`Failed to set up trust line: ${trustMeta.TransactionResult}`);
+        }
+
+        let issueResponse: Response;
+        try {
+            issueResponse = await fetch(`${BACKEND_URL}/api/xrpl/issue-tokens`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ recipientAddress: wallet.address, amount: qty }),
+            });
+        } catch (fetchErr) {
+            const msg = fetchErr instanceof TypeError && fetchErr.message === "Failed to fetch"
+                ? "Backend server not reachable. Start it with: cd backend && npm run dev"
+                : fetchErr instanceof Error ? fetchErr.message : "Network error";
+            throw new Error(msg);
+        }
+        const issueData = await issueResponse.json().catch(() => ({}));
+        if (!issueResponse.ok) {
+            throw new Error((issueData as { error?: string }).error || "Failed to receive tokens from issuer");
+        }
+
+        const totalDrops = Math.floor(totalXrp * 1_000_000).toString();
+        const offerCreateTx: xrpl.OfferCreate = {
+            TransactionType: "OfferCreate",
+            Account: wallet.address,
+            TakerPays: totalDrops,
+            TakerGets: {
+                currency: TOKEN_CURRENCY,
+                value: quantity,
+                issuer: ISSUER_ADDRESS,
+            },
+            Flags: 0,
+        };
+        const prepared = await client.autofill(offerCreateTx);
+        const signed = wallet.sign(prepared);
+        const result = await client.submitAndWait(signed.tx_blob);
+        const meta = result.result.meta as xrpl.TransactionMetadata;
+
+        if (typeof meta === "object" && meta.TransactionResult === "tesSUCCESS") {
+            const sequence = prepared.Sequence;
+            const transactionId = `${wallet.address}:${sequence}`;
+            const { error: insertError } = await supabase
+                .from("api_key_transactions")
+                .insert({ api_key: apiKey.trim(), transaction_id: transactionId });
+            if (insertError) {
+                throw new Error("Transaction succeeded but failed to store API key record");
+            }
+            const weightedAvgPrice = await calculateWeightedAveragePrice(client);
+            if (weightedAvgPrice !== null) {
+                await supabase.from("token_prices").insert({
+                    token_name: TOKEN_CURRENCY,
+                    price: weightedAvgPrice,
+                    price_time: new Date().toISOString(),
+                });
+            }
+            return { hash: result.result.hash, transactionId };
+        }
+        const err = typeof meta === "object" ? meta.TransactionResult : "Unknown error";
+        throw new Error(`Transaction failed: ${err}`);
+    } finally {
+        await client.disconnect();
+    }
+}
+
 interface SellOrderDialogProps {
     trigger?: React.ReactNode;
+    /** When provided, dialog is controlled by parent (no trigger shown). */
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
 }
 
 interface FormErrors {
@@ -92,8 +338,11 @@ interface FormErrors {
     general?: string;
 }
 
-export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
-    const [open, setOpen] = useState(false);
+export function SellOrderDialog({ trigger, open: controlledOpen, onOpenChange }: SellOrderDialogProps) {
+    const [internalOpen, setInternalOpen] = useState(false);
+    const isControlled = controlledOpen !== undefined && onOpenChange !== undefined;
+    const open = isControlled ? controlledOpen : internalOpen;
+    const setOpen = isControlled ? (v: boolean) => onOpenChange?.(v) : setInternalOpen;
     const [apiKey, setApiKey] = useState("");
     const [quantity, setQuantity] = useState("");
     const [pricePerUnit, setPricePerUnit] = useState("");
@@ -145,178 +394,31 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (e?: React.MouseEvent) => {
+        e?.preventDefault();
         if (!validateForm()) return;
 
         setIsLoading(true);
         setErrors({});
 
         try {
-            // Get user info from Supabase
             const supabase = getSupabase();
-            if (!supabase) {
-                throw new Error("Supabase client not available");
-            }
+            if (!supabase) throw new Error("Supabase client not available");
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("User not authenticated");
 
-            const {
-                data: { user },
-            } = await supabase.auth.getUser();
-
-            if (!user) {
-                throw new Error("User not authenticated");
-            }
-
-            // Create wallet from secret
-            let wallet: xrpl.Wallet;
-            try {
-                wallet = xrpl.Wallet.fromSeed(secret.trim());
-            } catch {
-                setErrors({ secret: "Invalid wallet secret" });
-                setIsLoading(false);
-                return;
-            }
-
-            const qty = parseFloat(quantity);
-            const price = parseFloat(pricePerUnit);
-            const totalXrp = qty * price;
-
-            // Connect to XRPL testnet
-            const client = new xrpl.Client("wss://s.altnet.rippletest.net:51233");
-            await client.connect();
-
-            try {
-                // Step 1: Set up trust line for the token (if not already set up)
-                // This allows the wallet to hold GGK tokens
-                const trustSetTx: xrpl.TrustSet = {
-                    TransactionType: "TrustSet",
-                    Account: wallet.address,
-                    LimitAmount: {
-                        currency: TOKEN_CURRENCY,
-                        issuer: ISSUER_ADDRESS,
-                        value: "1000000000", // High limit to allow receiving tokens
-                    },
-                };
-
-                const preparedTrust = await client.autofill(trustSetTx);
-                const signedTrust = wallet.sign(preparedTrust);
-                const trustResult = await client.submitAndWait(signedTrust.tx_blob);
-                const trustMeta = trustResult.result.meta as xrpl.TransactionMetadata;
-
-                // Trust line setup is idempotent - tecDUPLICATE is OK if already exists
-                if (
-                    typeof trustMeta === "object" &&
-                    trustMeta.TransactionResult !== "tesSUCCESS" &&
-                    trustMeta.TransactionResult !== "tecDUPLICATE"
-                ) {
-                    throw new Error(`Failed to set up trust line: ${trustMeta.TransactionResult}`);
-                }
-
-                // Step 2: Request tokens from the issuer via backend
-                const issueResponse = await fetch(`${BACKEND_URL}/api/xrpl/issue-tokens`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        recipientAddress: wallet.address,
-                        amount: qty,
-                    }),
-                });
-
-                const issueData = await issueResponse.json();
-
-                if (!issueResponse.ok) {
-                    throw new Error(issueData.error || "Failed to receive tokens from issuer");
-                }
-
-                // Step 3: Create the sell offer on the DEX
-                // Convert XRP to drops (1 XRP = 1,000,000 drops)
-                const totalDrops = Math.floor(totalXrp * 1_000_000).toString();
-
-                // Create the OfferCreate transaction
-                // TakerGets: What the seller wants to receive (XRP)
-                // TakerPays: What the seller is offering (GGK tokens)
-                const offerCreateTx: xrpl.OfferCreate = {
-                    TransactionType: "OfferCreate",
-                    Account: wallet.address,
-                    TakerPays: totalDrops, // XRP in drops that seller wants
-                    TakerGets: {
-                        currency: TOKEN_CURRENCY,
-                        value: quantity, // Number of GGK tokens seller is selling
-                        issuer: ISSUER_ADDRESS,
-                    },
-                    Flags: 0, // Normal sell offer
-                };
-
-                // Prepare the transaction (adds sequence, fee, etc.)
-                const prepared = await client.autofill(offerCreateTx);
-
-                // Get the sequence number for transaction ID
-                const sequence = prepared.Sequence;
-
-                // Sign the transaction
-                const signed = wallet.sign(prepared);
-
-                // Submit the transaction
-                const result = await client.submitAndWait(signed.tx_blob);
-
-                const meta = result.result.meta as xrpl.TransactionMetadata;
-
-                if (
-                    typeof meta === "object" &&
-                    meta.TransactionResult === "tesSUCCESS"
-                ) {
-                    // Create transaction ID: wallet address + sequence
-                    const transactionId = `${wallet.address}:${sequence}`;
-
-                    // Store the API key and transaction ID in Supabase
-                    const { error: insertError } = await supabase
-                        .from("api_key_transactions")
-                        .insert({
-                            api_key: apiKey.trim(),
-                            transaction_id: transactionId,
-                        });
-
-                    if (insertError) {
-                        console.error("Error storing API key transaction:", insertError);
-                        throw new Error("Transaction succeeded but failed to store API key record");
-                    }
-
-                    // Calculate and store the weighted average price
-                    const weightedAvgPrice = await calculateWeightedAveragePrice(client);
-                    if (weightedAvgPrice !== null) {
-                        const { error: priceInsertError } = await supabase
-                            .from("token_prices")
-                            .insert({
-                                token_name: TOKEN_CURRENCY,
-                                price: weightedAvgPrice,
-                                price_time: new Date().toISOString(),
-                            });
-
-                        if (priceInsertError) {
-                            console.error("Error storing token price:", priceInsertError);
-                            // Don't throw - the main transaction succeeded
-                        }
-                    }
-
-                    setTxResult({
-                        hash: result.result.hash,
-                        transactionId,
-                    });
-                    setStep("success");
-                } else {
-                    const errorResult =
-                        typeof meta === "object" ? meta.TransactionResult : "Unknown error";
-                    throw new Error(`Transaction failed: ${errorResult}`);
-                }
-            } finally {
-                await client.disconnect();
-            }
+            const result = await submitSellOrder(supabase, user.id, {
+                apiKey: apiKey.trim(),
+                quantity,
+                pricePerUnit,
+                secret: secret.trim(),
+            });
+            setTxResult({ hash: result.hash, transactionId: result.transactionId });
+            setStep("success");
         } catch (error: unknown) {
-            console.error("Error creating sell order:", error);
-            const errorMessage =
-                error instanceof Error ? error.message : "Failed to create sell order";
-            setErrors({ general: errorMessage });
+            const msg = error instanceof Error ? error.message : "Failed to create sell order";
+            setErrors({ general: msg });
+            toast.error(msg, { position: "bottom-right" });
         } finally {
             setIsLoading(false);
         }
@@ -336,9 +438,11 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                 if (!isOpen) resetForm();
             }}
         >
-            <DialogTrigger asChild>
-                {trigger || <Button>Create Sell Order</Button>}
-            </DialogTrigger>
+            {!isControlled && (
+                <DialogTrigger asChild>
+                    {trigger || <Button>Create Sell Order</Button>}
+                </DialogTrigger>
+            )}
             <DialogContent className="sm:max-w-[425px]">
                 {step === "form" && (
                     <>
@@ -456,7 +560,11 @@ export function SellOrderDialog({ trigger }: SellOrderDialogProps) {
                             >
                                 Cancel
                             </Button>
-                            <Button onClick={handleSubmit} disabled={isLoading}>
+                            <Button
+                                type="button"
+                                onClick={handleSubmit}
+                                disabled={isLoading}
+                            >
                                 {isLoading ? "Issuing Tokens & Creating Order..." : "Create Sell Order"}
                             </Button>
                         </DialogFooter>

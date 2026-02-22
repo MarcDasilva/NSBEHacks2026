@@ -23,6 +23,9 @@ const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233";
 
 interface BuyOrderDialogProps {
   trigger?: React.ReactNode;
+  /** When provided, dialog is controlled by parent (no trigger shown). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface FormErrors {
@@ -97,8 +100,11 @@ async function fetchBestSellOffers(client: xrpl.Client): Promise<SellOffer[]> {
     .sort((a, b) => a.pricePerUnit - b.pricePerUnit);
 }
 
-export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
-  const [open, setOpen] = useState(false);
+export function BuyOrderDialog({ trigger, open: controlledOpen, onOpenChange }: BuyOrderDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined && onOpenChange !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = isControlled ? (v: boolean) => onOpenChange?.(v) : setInternalOpen;
   const [quantity, setQuantity] = useState("");
   const [secret, setSecret] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -323,13 +329,15 @@ export function BuyOrderDialog({ trigger }: BuyOrderDialogProps) {
         if (!isOpen) resetForm();
       }}
     >
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button variant="default" className="bg-green-600 hover:bg-green-700">
-            Buy Tokens
-          </Button>
-        )}
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          {trigger || (
+            <Button variant="default" className="bg-green-600 hover:bg-green-700">
+              Buy Tokens
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[425px]">
         {step === "form" && (
           <>

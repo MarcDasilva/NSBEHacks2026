@@ -24,6 +24,9 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { getApiKeyForWallet, submitSellOrder } from "@/components/sell-order-dialog";
+import { BuyOrderDialog } from "@/components/buy-order-dialog";
 import { motion } from "motion/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
@@ -264,6 +267,10 @@ export function BrowseApisView() {
   const [livePrices, setLivePrices] = useState<Record<string, { last: number; chg: number; chgPct: number }>>({});
   const [panelNews, setPanelNews] = useState<NewsItem[]>([]);
   const [panelNewsLoading, setPanelNewsLoading] = useState(false);
+  const [sellError, setSellError] = useState("");
+  const [sellSuccess, setSellSuccess] = useState("");
+  const [sellLoading, setSellLoading] = useState(false);
+  const [buyDialogOpen, setBuyDialogOpen] = useState(false);
 
   const QUOTE_OPTIONS = [
     { value: "XRP", label: "XRP" },
@@ -880,13 +887,85 @@ export function BrowseApisView() {
                   />
                   <button
                     type="button"
-                    className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 capitalize"
+                    disabled={sellOrBuy === "sell" ? sellLoading : false}
+                    onClick={async () => {
+                      if (sellOrBuy === "buy") {
+                        setBuyDialogOpen(true);
+                        return;
+                      }
+                      setSellError("");
+                      setSellSuccess("");
+                      const supabase = getSupabase();
+                      if (!supabase) {
+                        toast.error("Not signed in.", { position: "bottom-right" });
+                        return;
+                      }
+                      const { data: { user } } = await supabase.auth.getUser();
+                      if (!user) {
+                        toast.error("Not signed in.", { position: "bottom-right" });
+                        return;
+                      }
+                      if (!sellWalletId?.trim()) {
+                        toast.error("Select a wallet.", { position: "bottom-right" });
+                        return;
+                      }
+                      const qty = parseFloat(sellTokenCount);
+                      const price = parseFloat(sellPrice);
+                      if (!sellTokenCount || isNaN(qty) || qty <= 0) {
+                        toast.error("Enter a valid quantity.", { position: "bottom-right" });
+                        return;
+                      }
+                      if (!sellPrice || isNaN(price) || price <= 0) {
+                        toast.error("Enter a valid price.", { position: "bottom-right" });
+                        return;
+                      }
+                      const { data: walletRow } = await supabase
+                        .from("wallets")
+                        .select("wallet_secret")
+                        .eq("user_id", user.id)
+                        .eq("wallet_id", sellWalletId)
+                        .maybeSingle();
+                      const secret = walletRow?.wallet_secret?.trim();
+                      if (!secret) {
+                        toast.error("Add and save your wallet secret in Billing for this wallet.", { position: "bottom-right" });
+                        return;
+                      }
+                      const apiKey = await getApiKeyForWallet(supabase, user.id, sellWalletId);
+                      if (!apiKey) {
+                        toast.error("Connect an API provider to this wallet in Connections.", { position: "bottom-right" });
+                        return;
+                      }
+                      setSellLoading(true);
+                      setSellError("");
+                      setSellSuccess("");
+                      try {
+                        await submitSellOrder(supabase, user.id, {
+                          apiKey,
+                          quantity: sellTokenCount,
+                          pricePerUnit: sellPrice,
+                          secret,
+                        });
+                        setSellSuccess("Sell order created.");
+                        toast.success("Sell order created.", { position: "bottom-right" });
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : "Sell failed.";
+                        setSellError(msg);
+                        toast.error(msg, { position: "bottom-right" });
+                      } finally {
+                        setSellLoading(false);
+                      }
+                    }}
+                    className="mt-1 h-9 rounded-md bg-sidebar-accent px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/80 capitalize disabled:opacity-50"
                     style={{ fontFamily: "var(--font-geist-sans)" }}
                   >
-                    {sellOrBuy === "sell" ? "Sell" : "Buy"}
+                    {sellOrBuy === "sell" ? (sellLoading ? "Selling…" : "Sell") : "Buy"}
                   </button>
                 </div>
               </div>
+              <BuyOrderDialog
+                open={buyDialogOpen}
+                onOpenChange={setBuyDialogOpen}
+              />
               {/* News — single row, headlines as links */}
               <div className="mt-6 pl-0 pr-6">
                 <a

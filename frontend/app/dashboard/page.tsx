@@ -13,7 +13,6 @@ import { BrowseApisView } from "@/components/browse-apis-view";
 import { DashboardFlowView } from "@/components/dashboard-flow-view";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { Toaster } from "@/components/ui/sonner";
 
 const WELCOME_DURATION = 3.5;
 
@@ -233,7 +232,6 @@ export default function DashboardPage() {
                 </div>
               )}
             </SidebarInset>
-            <Toaster />
           </SidebarProvider>
         </div>
       )}

@@ -1,7 +1,7 @@
 # apiXchange
 
 ## Overview
-DevPost: https://devpost.com/software/apixchange\n
+DevPost: https://devpost.com/software/apixchange  
 apiXchange is a decentralized marketplace for API credits, built on top of the XRP Ledger (XRPL). The platform enables users to buy and sell unused API credits as fungible tokens, reducing waste and lowering costs for developers. The MVP currently supports OpenAI, Google, and Anthropic APIs, focusing on these providers due to hackathon time constraints.
 
 ## How XRPL is Used

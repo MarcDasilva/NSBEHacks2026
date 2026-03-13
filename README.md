@@ -65,3 +65,4 @@ The platform consists of several core components:
 ---
 
 *Built at a hackathon to reduce API credit waste and lower costs for developers, especially those from underrepresented backgrounds. The platform leverages XRPL for decentralized settlement and transparent tokenization of API usage rights.*
+# Simlabs
